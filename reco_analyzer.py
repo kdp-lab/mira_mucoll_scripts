@@ -112,7 +112,7 @@ reco_hit_info = {layer: {f: [] for f in reco_fields}  for layer in layers}
 # then later fill like: sim_hit_info["VB"]["x"].append(sim_x_value)
 
 # make counter variables: number of: mcp staus, inner hits, i, matched tracks, dupes (?), fake tracks, truth staus
-n_mcp_stau = 0
+n_reco_stau = 0
 n_inner_hits = 0
 n_event = 0
 n_match_tracks = 0
@@ -243,57 +243,42 @@ for mcp in mcp_collection:
             layer = decoder["layer"].value()
             side = decoder["side"].value() # i don't know what this means/if we're actually using it
             
-            if layer not in seen_layers:
-                n_layers_crossed += 0.5 if system in (1, 2) else 1.0
-                seen_layers.add(layer)
-                if layer_map["system"] == "pix": 
-                    n_pix_hits += 1
-                elif layer_map["system"] == "inner": 
-                    n_inner_hits +=1
-                else: 
-                    n_outer_hits += 1
-                # TODO: do we want to save info about if it's barrel/endcap? could be helpful?
-
-                track_x_pos = hit.getPosition()[0]
-                track_y_pos = hit.getPosition()[1]
-                track_z_pos = hit.getPosition()[2]
-
-                distance = sqrt(track_x_pos**2 + track_y_pos**2 + track_z_pos**2)
-                flight_time = distance/c
-
-                if system > 2:
-                    resolution = 0.06
-                else: 
-                    resolution = 0.03
-                
-                track_corrected_time = hit.getTime()*(1.+ROOT.TRandom3(0).Gaus(0., resolution)) - flight_time # this is complicated messed up timing i am not going to mess with rn
-                # TODO: set TRandom(3) to 0 because it was previously set to ievt, but we again only have one event per file right now. change? because i think this means new time every run
-
-                # TODO: add everything to big dictionary lists above, check if this is right? is it ok that everything is in one big list
-                match_track_info["x"].append(track_x_pos)
-                match_track_info["y"].append(track_y_pos)
-                match_track_info["z"].append(track_z_pos)
-                match_track_info["time"].append(hit.getTime())
-                match_track_info["corrected_time"].append(track_corrected_time)
-                match_track_info["detector_hit"].append(system)
-                match_track_info["layer_hit"].append(layer)
-                match_track_info["side_hit"].append(side)
+            if layer in seen_layers: # TODO: I think this will work the same as before??? Check
+                continue
             
+            n_layers_crossed += 0.5 if system in (1, 2) else 1.0
+            seen_layers.add(layer)
+            if layer_map["system"] == "pix": 
+                n_pix_hits += 1
+            elif layer_map["system"] == "inner": 
+                n_inner_hits +=1
+            else: 
+                n_outer_hits += 1
+            # TODO: do we want to save info about if it's barrel/endcap? could be helpful?
+
+            track_x_pos = hit.getPosition()[0]
+            track_y_pos = hit.getPosition()[1]
+            track_z_pos = hit.getPosition()[2]
+            
+            # going to ignore tracks that don't have 3.5+ hits since they aren't reliable for reco
             n_total_hits = (n_pix_hits)/2.0 + n_inner_hits + n_outer_hits
-            # getting rid of tracks with less than 3.5 hits because they aren't reliable:
             if n_total_hits < 3.5:
                 continue 
-            
-            #### so, only doing the following if there are 3.5 hits or more, meaning the track and mcp can be matched. now looking at reco info for that 
-            
-            # add to match_stau_info lists -- this is the same sim info as before but now that we have confirmed the track for it we can add it to these lists as well
-            # TODO: I think? but then why don't we save all the other information too, or mark it somehow with like "matched stau"
-            match_stau_info["pt"].append(mcp_stau_info["pt"])
-            match_stau_info["eta"].append(mcp_stau_info["eta"])
-            match_stau_info["phi"].append(mcp_stau_info["phi"])
-            match_stau_info["theta"].append(mcp_stau_info["theta"])
+            n_reco_stau += 1
+            #### so, only doing the following if there are 3.5 hits or more, meaning the track and mcp can be matched. now looking more at reco info for that 
 
+            distance = sqrt(track_x_pos**2 + track_y_pos**2 + track_z_pos**2)
+            flight_time = distance/c
+
+            if system > 2:
+                resolution = 0.06
+            else: 
+                resolution = 0.03
+                
+            track_corrected_time = hit.getTime()*(1.+ROOT.TRandom3(0).Gaus(0., resolution)) - flight_time # this is complicated messed up timing i am not going to mess with rn
+            # CHECK: set TRandom(3) to 0 because it was previously set to ievt, but we again only have one event per file right now. change? because i think this means new time every run
             # now for reco'd track information for these matched things
+                               
             track_tlv = ROOT.TLorentzVector()
             theta = np.pi/2 - np.arctan(track.getTanLambda())
             phi = track.getPhi()
@@ -306,6 +291,7 @@ for mcp in mcp_collection:
             # add to match_track_info lists. TODO: Tate has these in the form of lists (like [p_t] instead of just pt), do i need to do this
             match_track_info["pt"].append(p_t)
             match_track_info["theta"].append(theta)
+            match_track_info["phi"].append(phi)
             match_track_info["ndf"].append(track.getNdf()) # what is this
             match_track_info["chi_sq"].append(track.getChi2())
             match_track_info["d0"].append(track.getD0())
@@ -313,7 +299,36 @@ for mcp in mcp_collection:
             match_track_info["pt_res"].append(p_t_res) 
 
             match_track_info["n_hits"].append(n_track_hits)
-            # TODO: ah, ok here is why tate had extra layers of lists. we did this earlier but shouldn't have because we need to make sure it has enough hits first
-            match_track_info["x"].append()
+            match_track_info["n_hits_vertex"].append(n_pix_hits)
+            match_track_info["n_hits_inner"].append(n_inner_hits)
+            match_track_info["n_hits_outer"].append(n_outer_hits)
 
-            
+            match_track_info["x"].append(track_x_pos)
+            match_track_info["y"].append(track_y_pos)
+            match_track_info["z"].append(track_z_pos)
+            match_track_info["time"].append(hit.getTime())
+            match_track_info["corrected_time"].append(track_corrected_time)
+            match_track_info["detector_hit"].append(system)
+            match_track_info["layer_hit"].append(layer)
+            match_track_info["side_hit"].append(side) 
+
+            # add to match_stau_info lists -- this is the same sim info as before but now that we have confirmed the track for it we can add it to these lists as well
+            # TODO: I think? but then why don't we save all the other information too, or mark it somehow with like "matched stau"
+            # i guess because the reco only gives us this information so thisis the part we can compare with sim? and keep it separate from the others?
+            match_stau_info["pt"].append(mcp_stau_info["pt"])
+            match_stau_info["eta"].append(mcp_stau_info["eta"])
+            match_stau_info["phi"].append(mcp_stau_info["phi"])
+            match_stau_info["theta"].append(mcp_stau_info["theta"])
+
+reader.close()
+
+# phew.
+# NOTE: n_reco_stau is number of staus that have been reconstructed?? or number of reconstructed staus that correspond to a truth one? 
+
+print("\nSummary Statistics:")
+print("Found:")
+print(f"Total truth-level staus: {n_truth_stau}")
+print(f"Reconstructable staus: {n_reco_stau}")
+print(f"Non-reconstructable staus: {n_truth_stau - n_reco_stau}")
+
+# TODO: save everything to a json file
