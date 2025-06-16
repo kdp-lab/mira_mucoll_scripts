@@ -35,7 +35,6 @@ parser.add_argument(
 args = parser.parse_args()
 
 ### constants ###
-max_events = -1 #-1 runs over all events apparently
 Bfield = 3.57
 c = 299792458/1000000  # mm/ns 
 stau_ids = [1000015, 2000015]
@@ -51,9 +50,8 @@ print("looking for chunk", chunk)
 file_name = glob.glob(in_file)
 print("found %i files:"%len(file_name), in_file)
 
-#### MAKE BIG EMPTY LISTS ####
+#### MAKE BIG EMPTY LISTS #### fill later like stau["val"].append(val)
 # make lists of info we want to eventually save for MCParticles (truth level) 
-# fill later like stau["beta"].append(beta_val)
 mcp_stau_info = {
     "beta": [],
     "m": [], 
@@ -78,7 +76,7 @@ match_stau_info = {
     "theta": []
 }
 
-# make lists of info about stau tracks (reco)
+# make lists of info about stau tracks (exclusively reco type information)
 match_track_info = {
     "pt": [],
     "theta": [],
@@ -103,11 +101,13 @@ match_track_info = {
 }
 
 # make lists of info for hits (reco)
+# these are from sim information, accounts of how they hit the detectors -- truth level. and the reco ones are predictions by the sim files?? 
+# NOTE check this because I'm confused
 layers = ["VB", "VE", "IB", "IE", "OB", "OE"]
 sim_fields = ["x", "y", "z", "time", "pdg", "mcpid", "layer"]
 reco_fields = ["x", "y", "z", "time", "layer"]
 
-sim_hit_info = {layer: {f: [] for f in sim_fields}   for layer in layers}
+sim_hit_info = {layer: {f: [] for f in sim_fields} for layer in layers}
 reco_hit_info = {layer: {f: [] for f in reco_fields}  for layer in layers}
 # then later fill like: sim_hit_info["VB"]["x"].append(sim_x_value)
 
@@ -138,8 +138,6 @@ hit_relations = {name: UTIL.LCRelationNavigator(event.getCollection(f"{name}Rela
  
 # use like: n_itb_hits  = hit_collections["ITBarrelHits"].getNumberOfElements()
 
-# here, tate makes a whole new set of lists from lines above. i am going to try to avoid doing that
-
 mapping = [
     ("VertexBarrelCollection", hit_relations["VXDBarrelHits"], sim_hit_info["VB"], reco_hit_info["VB"]),
     ("VertexEndcapCollection", hit_relations["VXDEndcapHits"], sim_hit_info["VE"], reco_hit_info["VE"]),
@@ -149,8 +147,8 @@ mapping = [
     ("OuterTrackerEndcapCollection", hit_relations["OTEndcapHits"], sim_hit_info["OE"], reco_hit_info["OE"])
 ]
 
-# Big loop 1: here we are saving the hit information for each detector layer 1 by one from both sim and reco to the lists we made above
-# probably a way to combine this loop with something above and below? 
+# Big loop 1: here we are saving the hit information for each detector layer 1 by one from sim to the lists we made above -- sim and what sim predicts reco is?
+# probably a way to combine this loop with the second loop below? or this is what can be done in a separate file
 for coll_name, relation, sim_info, reco_info in mapping:
     try:
         collection = event.getCollection(coll_name) # we are already doing this above to make hit_collections list, do we need to do it again? or not do it there?
@@ -158,10 +156,7 @@ for coll_name, relation, sim_info, reco_info in mapping:
             sim_info["x"].append(hit.getPosition()[0]) 
             sim_info["y"].append(hit.getPosition()[1]) 
             sim_info["z"].append(hit.getPosition()[2]) 
-            sim_info["time"].append(hit.getTime())
-
-            # ok this is where i'm concerned i might need the weird inner lists because will it add all the info from all 
-            # of the files to the same lists? is that a problem?
+            sim_info["time"].append(hit.getTime()) 
 
             # Get the info about the MCParticle -- what kind of particle it is, and add to the sim info list
             mcp = hit.getMCParticle()  
@@ -173,9 +168,6 @@ for coll_name, relation, sim_info, reco_info in mapping:
             decoder = pyLCIO.UTIL.BitField64(encoding)
             cellID = int(hit.getCellID0())
             sim_info["layer"].append(decoder["system"].value())
-            ## not sure if i need these? 
-            # detector = decoder["system"].value() 
-            # side = decoder["side"].value()
 
             # then reco info. maybe this is what the problem was with tate's script, should i move it out of here?
             reco_hit = relation.getRelatedFromObjects(hit)
