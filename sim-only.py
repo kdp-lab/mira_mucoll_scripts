@@ -102,7 +102,7 @@ for event in event_looper(reader, args.all_events):
 
         mcp_stau_momentum = mcp.getMomentum() 
         mcp_stau_tlv = ROOT.TLorentzVector()
-        mcp_stau_tlv.setPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
+        mcp_stau_tlv.SetPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
         mcp_stau_beta = mcp_stau_tlv.Beta()
         
         mcp_stau_info["p_tot"].append(mcp_stau_tlv.Mag())

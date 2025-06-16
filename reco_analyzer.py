@@ -8,10 +8,6 @@ from math import *
 import numpy as np
 import argparse
 
-# Trying to rewrite Tate's analysis code for slcio files
-# TODO: don't know if i need this line/what it does
-ROOT.gROOT.SetBatch()
-
 # Set up the argument parser
 parser = argparse.ArgumentParser(description="Analyze SLCIO chunks.")
 parser.add_argument(
@@ -44,7 +40,7 @@ stau_ids = [1000015, 2000015]
 
 ### input files ###
 in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco_try1/"
-save_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/"
+save_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/reco/"
 file_name = "4000_10" 
 chunk = args.chunk
 in_file = f"{in_path}{file_name}_reco{chunk}.slcio"
@@ -85,14 +81,10 @@ match_track_info = {
     "n_hits_outer": [],
 }
 
-# make lists of info for hits (reco)
-# these are from sim information, accounts of how they hit the detectors -- truth level. and the reco ones are predictions by the sim files?? 
-# NOTE check this because I'm confused
-
 reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
 reader.open(file_name)
 
-# Looping through events but only if we need to (I've been running with one event per chunk, if this isn't the case add --all-events to the sh script)
+# Looping through events but only if we need to (I've been running with one event per chunk, if this isn't the case add --all-events to the sh script line 7)
 for event in event_looper(reader, args.all_events): 
     mcp_collection = event.getCollection("MCParticle")
     rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
@@ -114,7 +106,7 @@ for event in event_looper(reader, args.all_events):
         # NOTE: this is also done in the sim-only file but I'm redoing it here because I don't know how to get the relations saved 
         mcp_stau_momentum = mcp.getMomentum() 
         mcp_stau_tlv = ROOT.TLorentzVector()
-        mcp_stau_tlv.setPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
+        mcp_stau_tlv.SetPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
 
         mcp_pt = mcp_stau_tlv.Perp()
         mcp_eta = mcp_stau_tlv.Eta()
@@ -151,7 +143,10 @@ for event in event_looper(reader, args.all_events):
                     n_outer_hits += 1
                 # TODO: do we want to save info about if it's barrel/endcap? could be helpful?
 
-                hit_x_pos, hit_y_pos, hit_z_pos = hit.getPosition() 
+                hit_x_pos = hit.getPosition()[0] 
+                hit_y_pos = hit.getPosition()[1] 
+                hit_z_pos = hit.getPosition()[2] 
+
                 distance = sqrt(hit_x_pos**2 + hit_y_pos**2 + hit_z_pos**2)
                 flight_time = distance/c
                 
@@ -163,15 +158,16 @@ for event in event_looper(reader, args.all_events):
                 track_corrected_time = hit.getTime()*(1.+ROOT.TRandom3(0).Gaus(0., resolution)) - flight_time # this is complicated messed up timing i am not going to mess with rn
                 # TODO: set TRandom(3) to 0 because it was previously set to ievt, but we again only have one event per file right now. change? because i think this means new time every run
                 # now for reco'd track information for these matched things
+                det_key = layer_map[system] 
 
-                match_track_info["hits"][system]["x"].append(hit_x_pos)
-                match_track_info["hits"][system]["y"].append(hit_y_pos)
-                match_track_info["hits"][system]["z"].append(hit_z_pos)
+                match_track_info["hits"][det_key]["x"].append(hit_x_pos)
+                match_track_info["hits"][det_key]["y"].append(hit_y_pos)
+                match_track_info["hits"][det_key]["z"].append(hit_z_pos)
 
-                match_track_info["hits"][system]["layer_hit"].append(layer)
-                match_track_info["hits"][system]["side_hit"].append(side) 
-                match_track_info["hits"][system]["time"].append(hit.getTime())
-                match_track_info["hits"][system]["corrected_time"].append(track_corrected_time)
+                match_track_info["hits"][det_key]["layer_hit"].append(layer)
+                match_track_info["hits"][det_key]["side_hit"].append(side) 
+                match_track_info["hits"][det_key]["time"].append(hit.getTime())
+                match_track_info["hits"][det_key]["corrected_time"].append(track_corrected_time)
       
             # going to ignore tracks that don't have 3.5+ hits since they aren't reliable for reco
             n_total_hits = (n_pix_hits)/2.0 + n_inner_hits + n_outer_hits 
