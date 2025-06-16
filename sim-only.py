@@ -2,6 +2,7 @@
 
 import pyLCIO
 from pyLCIO import UTIL
+import ROOT
 import glob
 import json
 from math import *
@@ -56,14 +57,6 @@ def event_looper(reader, all_events):
 
 ### empty lists for things we care about ###
 
-hit_info = {
-    "pdg_id": [],
-    "x": [],
-    "y": [],
-    "z": [],
-    "layer": []
-}
-
 systems = [
     ("VertexBarrelCollection", "VB"),
     ("VertexEndcapCollection", "VE"),
@@ -74,6 +67,21 @@ systems = [
 ]
 
 # making empty lists for the things we want to save from each system's collection, add to like hit_info["VB"]["x"].append( ... ) etc
+
+mcp_stau_info = {
+    "p_tot": [],
+    "p_x": [],
+    "p_y": [],
+    "p_z": [],
+    "energy": [],
+    "m": [],
+    "beta": [],
+    "pt": [],
+    "eta": [],
+    "phi": [],
+    "theta": [],
+    "travel_distance": []
+}
 systems_key  = ["VB", "VE", "IB", "IE", "OB", "OE"]
 fields = ["pdg", "x", "y", "z", "time", "layer", "stau"]
 
@@ -82,14 +90,35 @@ hit_info = {key: {f: [] for f in fields} for key in systems_key}
 for event in event_looper(reader, args.all_events): 
     # total stau count
     n_truth_staus = 0
+    ### MCP information ###
     mcps = event.getCollection("MCParticle")
     for mcp in mcps:
-        # skipping staus that have stau parents (intermediate staus)
+        # skipping staus that have stau parents (intermediate staus) and particles that aren't staus
         if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
             continue
-        if abs(mcp.getPDG()) in stau_ids:
-            n_truth_staus +=1
+        if abs(mcp.getPDG()) not in stau_ids:
+            continue
+        n_truth_staus +=1
 
+        mcp_stau_momentum = mcp.getMomentum() 
+        mcp_stau_tlv = ROOT.TLorentzVector()
+        mcp_stau_tlv.setPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
+        mcp_stau_beta = mcp_stau_tlv.Beta()
+        
+        mcp_stau_info["p_tot"].append(mcp_stau_tlv.Mag())
+        mcp_stau_info["p_x"].append(mcp_stau_momentum[0])
+        mcp_stau_info["p_y"].append(mcp_stau_momentum[1])
+        mcp_stau_info["p_z"].append(mcp_stau_momentum[2])
+        mcp_stau_info["energy"].append(mcp.getEnergy())
+        mcp_stau_info["m"].append(mcp.getMass())
+        mcp_stau_info["beta"].append(mcp_stau_beta)
+        mcp_stau_info["pt"].append(mcp_stau_tlv.Perp())
+        mcp_stau_info["eta"].append(mcp_stau_tlv.Eta())
+        mcp_stau_info["phi"].append(mcp_stau_tlv.Phi())
+        mcp_stau_info["theta"].append(mcp_stau_tlv.Theta())
+        mcp_stau_info["travel_distance"].append(sqrt(mcp.getEndpoint()[0]**2 + mcp.getEndpoint()[1]**2 + mcp.getEndpoint()[2]**2) - sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2 + mcp.getVertex()[2]**2))
+
+    ### Track information ###
     for system, key in systems:
         # looking at all of the hits in a particular system 
         hits = event.getCollection(system)
@@ -116,5 +145,6 @@ for event in event_looper(reader, args.all_events):
 reader.close()
 print("Total number of truth staus per event:", n_truth_staus)
 
+all_data = {"hit_info": hit_info, "mcp_stau_info": mcp_stau_info}
 with open(out_file, "w") as f:
-    json.dump(hit_info, f, indent=2)
+    json.dump(all_data, f, indent=2, sort_keys=True)
