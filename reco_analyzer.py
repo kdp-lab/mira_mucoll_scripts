@@ -63,6 +63,7 @@ match_stau_info = {
 
 systems = ["VB", "VE", "IB", "IE", "OB", "OE"]
 hit_fields = ["x", "y", "z", "time", "corrected_time", "layer_hit", "side_hit", "mcp_id"]
+hit_collection_names = ["ITBarrelHits", "ITEndcapHits", "OTBarrelHits", "OTEndcapHits", "VXDBarrelHits", "VXDEndcapHits"]
 
 # make lists of info about stau tracks (exclusively reco type information)
 match_track_info = {
@@ -134,15 +135,14 @@ for event in event_looper(reader, args.all_events):
             
             # setting up tracker mapping: goes like pixel barrel, pixel endcap, inner barrel, inner endcap, etc
             system_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
-    
-            for hit in track.getTrackerHits():
-                col_name = hit.getParent().getName()         
-                decoder  = decoders[col_name]                
-                decoder.setValue(int(hit.getCellID0()))
 
-                system = decoder["system"].value()
-                layer  = decoder["layer"].value()
-                side   = decoder["side"].value()
+            for hit in track.getTrackerHits():
+                encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+                ## TODO: assuming that every collection has the same decoder parameters?
+                decoder = pyLCIO.UTIL.BitField64(encoding)
+                cellID = int(hit.getCellID0())
+                decoder.setValue(cellID) 
+                
                 system = decoder["system"].value()
                 layer = decoder["layer"].value()
                 side = decoder["side"].value() # NOTE: are we actually using this info?
@@ -172,7 +172,7 @@ for event in event_looper(reader, args.all_events):
                     
                 track_corrected_time = hit.getTime()*(1.+rand.Gaus(0., resolution)) - flight_time # this is complicated messed up timing i am not going to mess with rn 
                 # now for reco'd track information for these matched things
-                det_key = layer_map[system] 
+                det_key = system_map[system] 
 
                 track_hits[det_key]["x"].append(hit_x_pos)
                 track_hits[det_key]["y"].append(hit_y_pos)

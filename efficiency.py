@@ -52,8 +52,6 @@ for reco_file in os.listdir(reco_path):
             else:
                 match_track_info_RECO[field].extend(info)
 
-print(match_track_info_RECO["n_hits"])
-
 ### loading in sim info ###
 for sim_file in os.listdir(sim_path):
     with open(os.path.join(sim_path, sim_file)) as file:
