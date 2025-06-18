@@ -89,9 +89,14 @@ n_truth_staus = 0
 n_reco_staus = 0
 # Looping through events but only if we need to (I've been running with one event per chunk, if this isn't the case add --all-events to the sh script line 7)
 for event in event_looper(reader, args.all_events): 
-    # we're indexing only the inner tracker collection to get the shape for the encoder, then use the same one for all layers 
-    encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
-    decoder  = pyLCIO.UTIL.BitField64(encoding)
+    decoders = {}
+    for col_name in ("VBHits", "VEHits","ITBarrelHits", "ITEndcapHits","OTBarrelHits", "OTEndcapHits"):
+        try:
+            col = event.getCollection(col_name)
+        except pyLCIO.EVENT.DataNotAvailableException:
+            continue            
+    enc = col.getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+    decoders[col_name] = pyLCIO.UTIL.BitField64(enc)
     mcp_collection = event.getCollection("MCParticle")
     rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
     relation = pyLCIO.UTIL.LCRelationNavigator(rel_collection)
@@ -128,21 +133,27 @@ for event in event_looper(reader, args.all_events):
             n_outer_hits = 0 
             
             # setting up tracker mapping: goes like pixel barrel, pixel endcap, inner barrel, inner endcap, etc
-            layer_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
+            system_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
     
             for hit in track.getTrackerHits():
+                col_name = hit.getParent().getName()         
+                decoder  = decoders[col_name]                
                 decoder.setValue(int(hit.getCellID0()))
+
+                system = decoder["system"].value()
+                layer  = decoder["layer"].value()
+                side   = decoder["side"].value()
                 system = decoder["system"].value()
                 layer = decoder["layer"].value()
                 side = decoder["side"].value() # NOTE: are we actually using this info?
                 
-                if layer in seen_layers: 
+                if (system,layer) in seen_layers: 
                     continue
+                seen_layers.add((system,layer))
 
-                seen_layers.add(layer)
-                if layer_map[system] in ("VB","VE"): 
+                if system_map[system] in ("VB","VE"): 
                     n_pix_hits += 1
-                elif layer_map[system] in ("IB", "IE"): 
+                elif system_map[system] in ("IB", "IE"): 
                     n_inner_hits +=1
                 else: 
                     n_outer_hits += 1 
