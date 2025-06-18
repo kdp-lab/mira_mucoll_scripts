@@ -38,6 +38,20 @@ for reco_file in os.listdir(reco_path):
         for field, info in chunk_reco_data["match_stau_info"].items(): 
             match_stau_info_RECO[field].extend(info)
         
-print(len(match_stau_info_RECO["theta"]))
+print(match_stau_info_RECO["theta"])
 
 
+### loading in sim info ###
+for sim_file in os.listdir(sim_path):
+    with open(os.path.join(sim_path, sim_file)) as file:
+        if get_chunk_id(sim_file) in bad_chunks:
+            continue
+        chunk_sim_data = json.load(file)
+        systems_key = chunk_sim_data["hit_info"].keys()
+        for system in systems_key:
+            for field in chunk_sim_data["hit_info"][system].keys():   
+                hit_info_SIM[system][field].extend(chunk_sim_data["hit_info"][system][field])  
+        if mcp_stau_info_SIM is None:
+            mcp_stau_info_SIM = {field: [] for field in chunk_sim_data["mcp_stau_info"].keys()}
+        for field, arr in chunk_sim_data["mcp_stau_info"].items():
+            mcp_stau_info_SIM[field].extend(arr)

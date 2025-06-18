@@ -83,7 +83,7 @@ mcp_stau_info = {
     "travel_distance": []
 }
 systems_key  = ["VB", "VE", "IB", "IE", "OB", "OE"]
-fields = ["pdg", "x", "y", "z", "time", "layer", "stau"]
+fields = ["id", "pdg", "x", "y", "z", "time", "layer", "stau"]
 
 hit_info = {key: {f: [] for f in fields} for key in systems_key}
 
