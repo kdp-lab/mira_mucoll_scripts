@@ -26,7 +26,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/sim_try1/"
-out_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/"
+out_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/7-18"
 sample = "4000_10"
 chunk = args.chunk
 in_file = f"{in_path}{sample}_sim{chunk}.slcio"
@@ -68,6 +68,7 @@ systems = [
 # making empty lists for the things we want to save from each system's collection, add to like hit_info["VB"]["x"].append( ... ) etc
 
 mcp_stau_info = {
+    "id": [],
     "p_tot": [],
     "p_x": [],
     "p_y": [],
@@ -103,7 +104,8 @@ for event in event_looper(reader, args.all_events):
         mcp_stau_tlv = ROOT.TLorentzVector()
         mcp_stau_tlv.SetPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
         mcp_stau_beta = mcp_stau_tlv.Beta()
-        
+
+        mcp_stau_info["id"].append(mcp.id())        
         mcp_stau_info["p_tot"].append(mcp_stau_tlv.Mag())
         mcp_stau_info["p_x"].append(mcp_stau_momentum[0])
         mcp_stau_info["p_y"].append(mcp_stau_momentum[1])
@@ -126,6 +128,7 @@ for event in event_looper(reader, args.all_events):
         for hit in hits:
             # saving the info of the particle that made each hit, if it's a stau or not
             mcp = hit.getMCParticle()
+            hit_info[key]["id"].append(mcp.id())
             hit_info[key]["pdg"].append(mcp.getPDG())         
             if np.abs(mcp.getPDG()) in stau_ids:
                 hit_info[key]["stau"].append("yes")

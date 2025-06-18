@@ -23,13 +23,11 @@ parser.add_argument(
 )
 def event_looper(reader, all_events):
     if all_events:
+        yield from reader
+    else:
         for evt in reader:
             yield evt
-    else:
-        evt = reader.readNextEvent()
-        if evt:                        
-            yield evt
-
+            break
 # Parse the arguments
 args = parser.parse_args()
 
@@ -37,10 +35,11 @@ args = parser.parse_args()
 Bfield = 3.57
 c = 299792458/1000000  # mm/ns 
 stau_ids = [1000015, 2000015]
+rand = ROOT.TRandom3(0)    
 
 ### input files ###
 in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco_try1/"
-save_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/reco/"
+save_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/reco/7-18/"
 file_name = "4000_10" 
 chunk = args.chunk
 in_file = f"{in_path}{file_name}_reco{chunk}.slcio"
@@ -58,11 +57,12 @@ match_stau_info = {
     "pt": [],
     "eta": [],
     "phi": [], 
-    "theta": []
+    "theta": [],
+    "id": []
 }
 
 systems = ["VB", "VE", "IB", "IE", "OB", "OE"]
-hit_fields = ["x", "y", "z", "time", "corrected_time", "layer_hit", "side_hit"]
+hit_fields = ["x", "y", "z", "time", "corrected_time", "layer_hit", "side_hit", "mcp_id"]
 
 # make lists of info about stau tracks (exclusively reco type information)
 match_track_info = {
@@ -84,20 +84,27 @@ match_track_info = {
 reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
 reader.open(file_name)
 
+seen_staus = set()
+n_truth_staus = 0
+n_reco_staus = 0
 # Looping through events but only if we need to (I've been running with one event per chunk, if this isn't the case add --all-events to the sh script line 7)
 for event in event_looper(reader, args.all_events): 
+    # we're indexing only the inner tracker collection to get the shape for the encoder, then use the same one for all layers 
+    encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+    decoder  = pyLCIO.UTIL.BitField64(encoding)
     mcp_collection = event.getCollection("MCParticle")
     rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
     relation = pyLCIO.UTIL.LCRelationNavigator(rel_collection)
-    n_truth_staus = 0
-    n_reco_staus = 0
     for mcp in mcp_collection:
         # only looking at staus
         if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
             continue
         if abs(mcp.getPDG()) not in stau_ids:
+            continue 
+        if mcp.id() in seen_staus:
             continue
         n_truth_staus +=1 # already did this in sim-only analysis, but maybe can serve as sanity check
+        reco_success = False
 
         stau_tracks = relation.getRelatedToObjects(mcp) # getting the stau's tracks (so this is reco info now) TODO: would it be better if we got this from alltracks??
         # or no because we want to have these tracks be reco stau hits
@@ -114,6 +121,7 @@ for event in event_looper(reader, args.all_events):
         mcp_theta = mcp_stau_tlv.Theta()
         
         for track in stau_tracks:
+            track_hits = {s:{f:[] for f in hit_fields} for s in systems}
             seen_layers = set() # making an empty set that we can add the layers to as we go through them so that we aren't double counting hits
             n_pix_hits = 0
             n_inner_hits = 0
@@ -121,9 +129,6 @@ for event in event_looper(reader, args.all_events):
             
             # setting up tracker mapping: goes like pixel barrel, pixel endcap, inner barrel, inner endcap, etc
             layer_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
-            encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)  
-            decoder = pyLCIO.UTIL.BitField64(encoding)
-            # we're indexing only the inner tracker collection to get the shape for the encoder, then use the same one for all layers 
     
             for hit in track.getTrackerHits():
                 decoder.setValue(int(hit.getCellID0()))
@@ -140,8 +145,7 @@ for event in event_looper(reader, args.all_events):
                 elif layer_map[system] in ("IB", "IE"): 
                     n_inner_hits +=1
                 else: 
-                    n_outer_hits += 1
-                # TODO: do we want to save info about if it's barrel/endcap? could be helpful?
+                    n_outer_hits += 1 
 
                 hit_x_pos = hit.getPosition()[0] 
                 hit_y_pos = hit.getPosition()[1] 
@@ -155,29 +159,34 @@ for event in event_looper(reader, args.all_events):
                 else: 
                     resolution = 0.03
                     
-                track_corrected_time = hit.getTime()*(1.+ROOT.TRandom3(0).Gaus(0., resolution)) - flight_time # this is complicated messed up timing i am not going to mess with rn
-                # TODO: set TRandom(3) to 0 because it was previously set to ievt, but we again only have one event per file right now. change? because i think this means new time every run
+                track_corrected_time = hit.getTime()*(1.+rand.Gaus(0., resolution)) - flight_time # this is complicated messed up timing i am not going to mess with rn 
                 # now for reco'd track information for these matched things
                 det_key = layer_map[system] 
 
-                match_track_info["hits"][det_key]["x"].append(hit_x_pos)
-                match_track_info["hits"][det_key]["y"].append(hit_y_pos)
-                match_track_info["hits"][det_key]["z"].append(hit_z_pos)
-
-                match_track_info["hits"][det_key]["layer_hit"].append(layer)
-                match_track_info["hits"][det_key]["side_hit"].append(side) 
-                match_track_info["hits"][det_key]["time"].append(hit.getTime())
-                match_track_info["hits"][det_key]["corrected_time"].append(track_corrected_time)
+                track_hits[det_key]["x"].append(hit_x_pos)
+                track_hits[det_key]["y"].append(hit_y_pos)
+                track_hits[det_key]["z"].append(hit_z_pos)
+                track_hits[det_key]["time"].append(hit.getTime())
+                track_hits[det_key]["corrected_time"].append(track_corrected_time)
+                track_hits[det_key]["layer_hit"].append(layer)
+                track_hits[det_key]["side_hit"].append(side)
+                track_hits[det_key]["mcp_id"].append(mcp.id()) 
       
-            # going to ignore tracks that don't have 3.5+ hits since they aren't reliable for reco
+            # going to ignore tracks that don't have 3.5+ hits since they aren't reliable for reco              
             n_total_hits = (n_pix_hits)/2.0 + n_inner_hits + n_outer_hits 
             # NOTE: dividing pix hits by two because current geometry uses doublet layers, this will not be true soon
             if n_total_hits < 3.5:
                 print("Not enough hits to reconstruct stau.")
-                continue 
-            n_reco_staus += 1
+                continue  
+            reco_success = True
+            seen_staus.add(mcp.id())
             # so, only doing the following if there are 3.5 hits or more, meaning the track and mcp can be matched. now looking more at reco info for that 
- 
+            
+            for s in systems:
+                for f in hit_fields:
+                    match_track_info["hits"][s][f].append(track_hits[s][f])
+            # reference like: match_track_info["hits"][<system>][<field>][<track index>]
+
             track_tlv = ROOT.TLorentzVector()
             theta = np.pi/2 - np.arctan(track.getTanLambda())
             phi = track.getPhi()
@@ -204,19 +213,27 @@ for event in event_looper(reader, args.all_events):
             # add to match_stau_info lists -- this is the same sim info as before but now that we have confirmed the track for it we can add it to these lists as well
             # TODO: I think? but then why don't we save all the other information too, or mark it somehow with like "matched stau"
             # i guess because the reco only gives us this information so thisis the part we can compare with sim? and keep it separate from the others?
+        if reco_success:
+            n_reco_staus += 1
             match_stau_info["pt"].append(mcp_pt)
             match_stau_info["eta"].append(mcp_eta)
             match_stau_info["phi"].append(mcp_phi)
             match_stau_info["theta"].append(mcp_theta)
+            match_stau_info["id"].append(mcp.id())
 
 reader.close()
 
+bad_files = []
 print("\nSummary Statistics:")
 print("Found:")
 print(f"Total truth-level staus: {n_truth_staus}")
 print(f"Reconstructable staus: {n_reco_staus}")
 print(f"Non-reconstructable staus: {n_truth_staus - n_reco_staus}")
+if n_truth_staus == 0:
+    print(chunk, "has no events?")
+    bad_files.append(chunk)
 
-all_data = {"match_stau_info": match_stau_info, "match_track_info": match_track_info}
+
+all_data = {"match_stau_info": match_stau_info, "match_track_info": match_track_info, "bad_files": bad_files}
 with open(out_file, "w") as f:
     json.dump(all_data, f, indent=2, sort_keys=True)
