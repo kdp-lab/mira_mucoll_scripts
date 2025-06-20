@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Loop through chunks
-for i in {0..9}
+for i in {0..499}
 do
   echo " "
   echo "-----------"

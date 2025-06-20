@@ -26,7 +26,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/sim_try1/"
-out_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/7-18"
+out_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/7-20/"
 sample = "4000_10"
 chunk = args.chunk
 in_file = f"{in_path}{sample}_sim{chunk}.slcio"
@@ -68,6 +68,7 @@ systems = [
 # making empty lists for the things we want to save from each system's collection, add to like hit_info["VB"]["x"].append( ... ) etc
 
 mcp_stau_info = {
+    "evvt_idx": [],
     "id": [],
     "p_tot": [],
     "p_x": [],
@@ -87,12 +88,13 @@ fields = ["id", "pdg", "x", "y", "z", "time", "layer", "stau"]
 
 hit_info = {key: {f: [] for f in fields} for key in systems_key}
 
-for event in event_looper(reader, args.all_events): 
+for evt_idx, event in enumerate(event_looper(reader, args.all_events)): 
     # total stau count
     n_truth_staus = 0
     ### MCP information ###
     mcps = event.getCollection("MCParticle")
     for mcp in mcps:
+        mcp_stau_info["event"].append(evt_idx)
         # skipping staus that have stau parents (intermediate staus) and particles that aren't staus
         if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
             continue

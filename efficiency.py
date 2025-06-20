@@ -27,9 +27,6 @@ stau_ids = {1000015, -1000015, 2000015, -2000015}
 events_data = []
 total_files_processed = []
 
-
-# Fixed acceptance calculation based on the previous code structure
-
 import json
 import os
 import numpy as np
