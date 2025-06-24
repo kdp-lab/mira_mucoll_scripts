@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from tqdm import tqdm
 
 
 ############# ESTIMATES ####################
@@ -97,12 +98,13 @@ reco_info = {sample: {
    }
 } for sample in sample_names}
 
+print("Analyzing reco files...")
 # for each of the masses we're looking at 
 for sample in sample_names:
     reco_path = os.path.join(reco_dir, sample)
     file_prefix = f"{sample}_reco"
     # for each of the 500 files
-    for i in range(9): #TODO: CHANGE THIS BACK TO 500
+    for i in tqdm(range(500)): 
         file_name = f"{file_prefix}{i}.slcio"
         file_path = os.path.join(reco_path, file_name)
 
@@ -118,7 +120,8 @@ for sample in sample_names:
             print(f"No event in: {file_path}")
             reader.close()
             continue
-
+        
+        # print(f"Analyzing {file_path}")
         seen_staus = set()
         mcp_collection = event.getCollection("MCParticle")
         rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
@@ -165,11 +168,11 @@ for sample in sample_names:
 
                     # corrected_time = hit.getTime()*(1.+rand.Gaus(0., resolution)) - flight_time
                     # TODO: check if corrected_time definition with the smearing is correct, but I feel like this should be already done in digi?
-                    corrected_time = hit.getTime() - flight_time
-                    corr_corr_time = 2*hit.getTime() - corrected_time
+                    # corrected_time = hit.getTime() - flight_time
+                    # corr_corr_time = 2*hit.getTime() - corrected_time
                     theta = np.arccos(hit_z_pos / distance)
 
-                    reco_info[sample][detector_key][layer].append((corr_corr_time, hit_z_pos, theta))
+                    reco_info[sample][detector_key][layer].append((hit.getTime(), hit_z_pos, theta))
             seen_staus.add(mcp.id())
                     
         reader.close()
@@ -200,36 +203,36 @@ reco_df.index.name = "mass [TeV]"
 
 pd.set_option("display.max_columns", None)
 print("========================================")
-print("\nReconstructed times ('corrected corrected times')")
+print("Average Reconstructed Times")
+print(" ")
 print(reco_df.to_string(float_format="{:0.7f}".format))
 print(" ")
-        
-
-
-
-
 
 #################### Plotting ############################
-# plot_dir = "/scratch/miralittmann/analysis/first_principles/plots/"
-# pdf_path = os.path.join(plot_dir, "v0_test.pdf") # CHANGE NAME HERE
-# pdf = PdfPages(pdf_path)
+plot_dir = "/scratch/miralittmann/analysis/first_principles/plots/"
+pdf_path = os.path.join(plot_dir, "v0_test.pdf") # CHANGE NAME HERE
+pdf = PdfPages(pdf_path)
 
-# for sample in sample_names:
-#     mass = int(sample)/1000
-#     for subdet in subdetectors:
-#         if subdet == "VB":
-#             num_layers = 8
-#         else:
-#             num_layers = 4
+for sample in sample_names:
+    mass = int(sample)/1000
+    for subdet in subdetectors:
+        if subdet == "VB":
+            num_layers = 8
+        else:
+            num_layers = 4
 
-#         for layer in range(num_layers):
-#             times, z, theta = reco_info[sample][subdet][layer]
+        for layer in range(num_layers):
+            times, z, theta = reco_info[sample][subdet][layer]
 
-#             fig, ax = plt.subplots()
-#             ax.hist(times, bins=100)
-#             ax.axvline(x=stau_tof_df.loc[mass, f"{subdet}_{layer}"])
-#             ax.set_title(f"{subdet} layer {layer}")
-#             ax.set_xlabel("hits")
-#             ax.set_ylabel("corrected time [ns]")
+            fig, ax = plt.subplots()
+            ax.hist(times, bins=100)
+            ax.axvline(x=stau_tof_df.loc[mass, f"{subdet}_{layer}"])
+            ax.set_title(f"{subdet} layer {layer}")
+            ax.set_xlabel("hits")
+            ax.set_ylabel("corrected time [ns]")
+
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
 
 
