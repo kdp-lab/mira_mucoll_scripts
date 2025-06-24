@@ -109,7 +109,7 @@ for sample in sample_names:
         file_path = os.path.join(reco_path, file_name)
 
         if not os.path.isfile(file_path):
-            print(f"File not found: {file_path}")
+            #print(f"File not found: {file_path}")
             continue
         
         reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
@@ -209,30 +209,55 @@ print(reco_df.to_string(float_format="{:0.7f}".format))
 print(" ")
 
 #################### Plotting ############################
-plot_dir = "/scratch/miralittmann/analysis/first_principles/plots/"
-pdf_path = os.path.join(plot_dir, "v0_test.pdf") # CHANGE NAME HERE
+plot_dir = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/"
+
+histograms = False
+vs_theta = True 
+vs_z = False 
+
+
+pdf_path = os.path.join(plot_dir, "vs_theta.pdf") # CHANGE NAME HERE
 pdf = PdfPages(pdf_path)
 
-for sample in sample_names:
-    mass = int(sample)/1000
-    for subdet in subdetectors:
-        if subdet == "VB":
-            num_layers = 8
-        else:
-            num_layers = 4
+with PdfPages(pdf_path) as pdf:
+    for sample in sample_names:
+        mass = int(sample.split("_")[0]) / 1000.0 
+        for subdet in subdetectors:
+            if subdet == "VB":
+                num_layers = 8
+            else:
+                num_layers = 3
 
-        for layer in range(num_layers):
-            times, z, theta = reco_info[sample][subdet][layer]
+            for layer in range(num_layers):
+                triples = reco_info[sample][subdet][layer]
+                if not triples:
+                    continue
 
-            fig, ax = plt.subplots()
-            ax.hist(times, bins=100)
-            ax.axvline(x=stau_tof_df.loc[mass, f"{subdet}_{layer}"])
-            ax.set_title(f"{subdet} layer {layer}")
-            ax.set_xlabel("hits")
-            ax.set_ylabel("corrected time [ns]")
+                times, z, theta = zip(*triples)
+                times = list(times)
+                z = list(z)
+                theta = list(theta)
+                
+                fig, ax = plt.subplots()
+                if histograms == True:
+                    ax.hist(times, bins=100, histtype="stepfilled")
+                    ax.axvline(x=stau_tof_df.loc[mass, f"{subdet}_{layer}"], color='r', linestyle = '--')
+                    ax.set_title(f"{mass} TeV: {subdet} layer {layer}")
+                    ax.set_ylabel("hits")
+                    ax.set_xlabel("corrected time [ns]") 
 
-            fig.tight_layout()
-            pdf.savefig(fig)
-            plt.close(fig)
+                if vs_z == True:
+                    ax.scatter(z, times)
+                    ax.set_title(f"{mass} TeV: {subdet} layer {layer}")
+                    ax.set_ylabel("corrected time [ns]")
+                    ax.set_xlabel("z [mm]")
+                
+                if vs_theta == True:
+                    ax.scatter(theta, times)
+                    ax.set_title(f"{mass} TeV: {subdet} layer {layer}")
+                    ax.set_ylabel("corrected time [ns]")
+                    ax.set_xlabel("Theta [rad]")
 
-
+                fig.tight_layout()
+                pdf.savefig(fig)
+                plt.close(fig)
