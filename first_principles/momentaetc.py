@@ -1,6 +1,18 @@
 import numpy as np
 import pandas as pd
+import os 
+import pyLCIO
+from pyLCIO import UTIL
+from math import *
+import math
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
+
+############# ESTIMATES ####################
 stau_masses = np.array([1, 2.5, 4, 4.5]) # in TeV. just using what we have rn in the tbl files, could do more
 com_energy = 10 # also in TeV, CoM energy in muon collider
 stau_energy = com_energy / 2 # assuming it's split evenly (is this fair?)
@@ -10,18 +22,22 @@ c = 299792458/1000000  # mm/ns
 
 # locations of subdetector layers (in mm) (just barrel)
 subdet_locs = {
-    "vb_0": 30,
-    "vb_1": 51,
-    "vb_3": 74,
-    "vb_4": 102,
+    "VB_0": 30,
+    "VB_1": 32,
+    "VB_2": 51,
+    "VB_3": 53,
+    "VB_4": 74,
+    "VB_5": 76,
+    "VB_6": 102,
+    "VB_7": 103,
 
-    "ib_0": 127,
-    "ib_1": 340,
-    "ib_2": 554,
+    "IB_0": 127,
+    "IB_1": 340,
+    "IB_2": 554,
 
-    "ob_0": 819,
-    "ob_1": 1153,
-    "ob_2": 1486
+    "OB_0": 819,
+    "OB_1": 1153,
+    "OB_2": 1486
 }
 
 def get_tof_reg():
@@ -45,9 +61,175 @@ def get_tof_reg():
 
 stau_tof_df = get_tof_reg()
 print("\n===============================================")
-print("Corrected Time-of-Flight (ns) for Stau particles:")
+print("Mira's calculations")
 print(stau_tof_df)
 print(" ")
 
+################ Want to plot hit time distributions for different subdetectors, layers (vs z or theta) ################################
+reco_dir = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/first_principles/"
+sample_names = ["1000_10", "2500_10", "4000_10", "4500_10"] 
+subdetectors = ["VB", "IB", "OB"]
+# rand = ROOT.TRandom3(0) 
+system_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
+stau_ids = [1000015, 2000015]
 
-     
+# collecting info. Sample --> Detector --> Layer --> (Hit times, Hit z, Hit theta)
+reco_info = {sample: {
+    "VB": {
+        0: [],
+        1: [],
+        2: [],
+        3: [],
+        4: [],
+        5: [],
+        6: [],
+        7: [] 
+    },
+    "IB": {
+        0: [],
+        1: [],
+        2: [],
+   },
+    "OB": { 
+        0: [],
+        1: [],
+        2: [],
+   }
+} for sample in sample_names}
+
+# for each of the masses we're looking at 
+for sample in sample_names:
+    reco_path = os.path.join(reco_dir, sample)
+    file_prefix = f"{sample}_reco"
+    # for each of the 500 files
+    for i in range(9): #TODO: CHANGE THIS BACK TO 500
+        file_name = f"{file_prefix}{i}.slcio"
+        file_path = os.path.join(reco_path, file_name)
+
+        if not os.path.isfile(file_path):
+            print(f"File not found: {file_path}")
+            continue
+        
+        reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
+        reader.open(file_path)
+
+        event = reader.readNextEvent()
+        if event is None:
+            print(f"No event in: {file_path}")
+            reader.close()
+            continue
+
+        seen_staus = set()
+        mcp_collection = event.getCollection("MCParticle")
+        rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
+        relation = pyLCIO.UTIL.LCRelationNavigator(rel_collection)
+
+        # for one of the staus in the event. filtering for staus that are non-intermediate and unique
+        for mcp in mcp_collection:
+            if abs(mcp.getPDG()) not in stau_ids:
+                continue 
+            if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
+                continue
+            if mcp.id() in seen_staus:
+                continue
+
+            stau_tracks = relation.getRelatedToObjects(mcp)
+            for track in stau_tracks:
+                seen_layers = set()
+                for hit in track.getTrackerHits():
+                    encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+                    decoder = pyLCIO.UTIL.BitField64(encoding)
+                    cellID = int(hit.getCellID0())
+                    decoder.setValue(cellID)
+
+                    detector = decoder["system"].value()
+                    detector_key = system_map[detector]
+                    layer = decoder["layer"].value()
+                    if (detector,layer) in seen_layers: 
+                        continue
+                    if detector in (2, 4, 6):
+                        continue
+                    seen_layers.add((detector,layer))
+
+                    hit_x_pos = hit.getPosition()[0] 
+                    hit_y_pos = hit.getPosition()[1] 
+                    hit_z_pos = hit.getPosition()[2] 
+
+                    distance = sqrt(hit_x_pos**2 + hit_y_pos**2 + hit_z_pos**2)
+                    flight_time = distance/c
+
+                    if detector > 2:
+                        resolution = 0.06
+                    else: 
+                        resolution = 0.03
+
+                    # corrected_time = hit.getTime()*(1.+rand.Gaus(0., resolution)) - flight_time
+                    # TODO: check if corrected_time definition with the smearing is correct, but I feel like this should be already done in digi?
+                    corrected_time = hit.getTime() - flight_time
+                    corr_corr_time = 2*hit.getTime() - corrected_time
+                    theta = np.arccos(hit_z_pos / distance)
+
+                    reco_info[sample][detector_key][layer].append((corr_corr_time, hit_z_pos, theta))
+            seen_staus.add(mcp.id())
+                    
+        reader.close()
+
+################################# converting averages to dataframe to check before making plots ##########################
+rows = []
+for sample, det_dict in reco_info.items():
+    for subdet, layer_dict in det_dict.items():
+        for layer, hits in layer_dict.items():
+            times = [hit[0] for hit in hits]
+            
+            avg_time = sum(times) / len(times) if times else math.nan
+
+            rows.append(
+                {
+                    "mass": sample,
+                    "subdet": subdet,
+                    "layer": layer,
+                    "avg_time": avg_time
+                })
+
+df = pd.DataFrame(rows)
+pivot = df.pivot_table(index=["mass", "subdet"], columns="layer", values="avg_time")
+df["mass_TeV"] = (df["mass"].str.split("_", expand=True)[0] .astype(int).div(1000.0))
+df["det_layer"] = df["subdet"] + "_" + df["layer"].astype(str)
+reco_df = (df.pivot_table(index="mass_TeV", columns="det_layer",values="avg_time").sort_index(axis=1, key=lambda idx: [("VB","IB","OB").index(col.split("_")[0]) * 10 + int(col.split("_")[1]) for col in idx]))
+reco_df.index.name = "mass [TeV]"
+
+pd.set_option("display.max_columns", None)
+print("========================================")
+print("\nReconstructed times ('corrected corrected times')")
+print(reco_df.to_string(float_format="{:0.7f}".format))
+print(" ")
+        
+
+
+
+
+
+#################### Plotting ############################
+# plot_dir = "/scratch/miralittmann/analysis/first_principles/plots/"
+# pdf_path = os.path.join(plot_dir, "v0_test.pdf") # CHANGE NAME HERE
+# pdf = PdfPages(pdf_path)
+
+# for sample in sample_names:
+#     mass = int(sample)/1000
+#     for subdet in subdetectors:
+#         if subdet == "VB":
+#             num_layers = 8
+#         else:
+#             num_layers = 4
+
+#         for layer in range(num_layers):
+#             times, z, theta = reco_info[sample][subdet][layer]
+
+#             fig, ax = plt.subplots()
+#             ax.hist(times, bins=100)
+#             ax.axvline(x=stau_tof_df.loc[mass, f"{subdet}_{layer}"])
+#             ax.set_title(f"{subdet} layer {layer}")
+#             ax.set_xlabel("hits")
+#             ax.set_ylabel("corrected time [ns]")
+
+
