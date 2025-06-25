@@ -170,7 +170,7 @@ for event in event_looper(reader, args.all_events):
                 else: 
                     resolution = 0.03
                     
-                track_corrected_time = hit.getTime()*(1.+rand.Gaus(0., resolution)) - flight_time # this is complicated messed up timing i am not going to mess with rn 
+                track_corrected_time = hit.getTime() # based on 1st principles calculations this is what we want
                 # now for reco'd track information for these matched things
                 det_key = system_map[system] 
 

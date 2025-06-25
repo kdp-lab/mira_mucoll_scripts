@@ -5,7 +5,6 @@ import pyLCIO
 from pyLCIO import UTIL
 from math import *
 import math
-import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -104,12 +103,12 @@ for sample in sample_names:
     reco_path = os.path.join(reco_dir, sample)
     file_prefix = f"{sample}_reco"
     # for each of the 500 files
-    for i in tqdm(range(500)): 
+    for i in tqdm(range(9)): # TODO: cahnge back to 500 
         file_name = f"{file_prefix}{i}.slcio"
-        file_path = os.path.join(reco_path, file_name)
+        file_path = os.path.join(reco_path, "bib/", file_name)
 
         if not os.path.isfile(file_path):
-            #print(f"File not found: {file_path}")
+            print(f"File not found: {file_path}")
             continue
         
         reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
@@ -161,15 +160,6 @@ for sample in sample_names:
                     distance = sqrt(hit_x_pos**2 + hit_y_pos**2 + hit_z_pos**2)
                     flight_time = distance/c
 
-                    if detector > 2:
-                        resolution = 0.06
-                    else: 
-                        resolution = 0.03
-
-                    # corrected_time = hit.getTime()*(1.+rand.Gaus(0., resolution)) - flight_time
-                    # TODO: check if corrected_time definition with the smearing is correct, but I feel like this should be already done in digi?
-                    # corrected_time = hit.getTime() - flight_time
-                    # corr_corr_time = 2*hit.getTime() - corrected_time
                     theta = np.arccos(hit_z_pos / distance)
 
                     reco_info[sample][detector_key][layer].append((hit.getTime(), hit_z_pos, theta))
@@ -208,13 +198,39 @@ print(" ")
 print(reco_df.to_string(float_format="{:0.7f}".format))
 print(" ")
 
+colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
+layers_order = reco_df.columns
+x_pos = range(len(layers_order))
+avg_pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/avgs_vs_layer.pdf"
+avg_pdf = PdfPages(avg_pdf_path)
+with PdfPages(avg_pdf_path) as pdf:
+    fig, ax = plt.subplots(figsize=(9,4.5))
+    for mass in reco_df.index:
+        y = reco_df.loc[mass].values
+        ax.plot(x_pos, y, marker='o',linewidth=1.6, label=f"{mass:.1f} TeV", color=colors.get(mass, 'k'))
+        ax.set_xticks(x_pos)
+    ax.set_xticklabels(layers_order, rotation=45, ha='right')
+    ax.set_xlabel("Tracker layer")
+    ax.set_ylabel("⟨t_corr⟩  [ns]")
+    ax.set_title("Average corrected time vs. detector layer")
+    ax.grid(alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.legend(title="Stau mass")
+
+    fig.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
+        
+
+
+
+
 #################### Plotting ############################
 plot_dir = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/"
 
 histograms = False
-vs_theta = True 
+vs_theta = False
 vs_z = False 
-
+colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
 
 pdf_path = os.path.join(plot_dir, "vs_theta.pdf") # CHANGE NAME HERE
 pdf = PdfPages(pdf_path)
