@@ -97,6 +97,37 @@ reco_info = {sample: {
    }
 } for sample in sample_names}
 
+bib = True
+all_hits = {sample: {
+    "VB": {
+        0: [],
+        1: [],
+        2: [],
+        3: [],
+        4: [],
+        5: [],
+        6: [],
+        7: []
+    },
+    "IB": {
+        0: [],
+        1: [],
+        2: []
+    },
+    "IB": {
+        0: [],
+        1: [],
+        2: []
+    }
+} for sample in sample_names}
+
+collection_mapping = {"VB": "VXDBarrelHits", 
+                      "VE": "VXDEndcapHits", 
+                      "IB": "ITBarrelHits", 
+                      "IE": "ITEndcapHits",
+                      "OB": "OTBarrelHits",
+                      "OE": "OTEndcapHits"}
+
 print("Analyzing reco files...")
 # for each of the masses we're looking at 
 for sample in sample_names:
@@ -105,7 +136,7 @@ for sample in sample_names:
     # for each of the 500 files
     for i in tqdm(range(9)): # TODO: cahnge back to 500 
         file_name = f"{file_prefix}{i}.slcio"
-        file_path = os.path.join(reco_path, "bib/", file_name)
+        file_path = os.path.join(reco_path, "no_bib/", file_name)
 
         if not os.path.isfile(file_path):
             print(f"File not found: {file_path}")
@@ -119,7 +150,10 @@ for sample in sample_names:
             print(f"No event in: {file_path}")
             reader.close()
             continue
-        
+       
+        encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+        decoder = pyLCIO.UTIL.BitField64(encoding)
+ 
         # print(f"Analyzing {file_path}")
         seen_staus = set()
         mcp_collection = event.getCollection("MCParticle")
@@ -139,8 +173,6 @@ for sample in sample_names:
             for track in stau_tracks:
                 seen_layers = set()
                 for hit in track.getTrackerHits():
-                    encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
-                    decoder = pyLCIO.UTIL.BitField64(encoding)
                     cellID = int(hit.getCellID0())
                     decoder.setValue(cellID)
 
@@ -157,79 +189,115 @@ for sample in sample_names:
                     hit_y_pos = hit.getPosition()[1] 
                     hit_z_pos = hit.getPosition()[2] 
 
-                    distance = sqrt(hit_x_pos**2 + hit_y_pos**2 + hit_z_pos**2)
-                    flight_time = distance/c
+                    distance = sqrt(hit_x_pos**2 + hit_y_pos**2 + hit_z_pos**2) 
 
                     theta = np.arccos(hit_z_pos / distance)
 
                     reco_info[sample][detector_key][layer].append((hit.getTime(), hit_z_pos, theta))
-            seen_staus.add(mcp.id())
-                    
+            seen_staus.add(mcp.id())                                    
         reader.close()
 
-################################# converting averages to dataframe to check before making plots ##########################
-rows = []
-for sample, det_dict in reco_info.items():
-    for subdet, layer_dict in det_dict.items():
-        for layer, hits in layer_dict.items():
-            times = [hit[0] for hit in hits]
+
+        ###################################### BIB hits ##########################################
+        if bib == True: 
+            print("Analyzing all hits from BIB files...")
+            bib_file_path = os.path.join(reco_path, "bib/", file_name)
+            if not os.path.isfile(bib_file_path):
+                print(f"File not found: {bib_file_path}")
+                continue
+            reader.open(bib_file_path)
+            event = reader.readNextEvent()
+            if event is None:
+                print(f"No event in {bib_file_path}")
+                continue
             
-            avg_time = sum(times) / len(times) if times else math.nan
+            for detector, collection_name in collection_mapping.items():
+                if detector in ("VE", "IE", "OE"):
+                    continue
 
-            rows.append(
-                {
-                    "mass": sample,
-                    "subdet": subdet,
-                    "layer": layer,
-                    "avg_time": avg_time
-                })
+                hit_collection = event.getCollection(collection_name)
+                for i in range(hit_collection.getNumberOfElements()):
+                    hit = hit_collection.getElementAt(i)
+                    hit_time = hit.getTime()
+                    cellID = int(hit.getCellID0())
+                    decoder.setValue(cellID)
 
-df = pd.DataFrame(rows)
-pivot = df.pivot_table(index=["mass", "subdet"], columns="layer", values="avg_time")
-df["mass_TeV"] = (df["mass"].str.split("_", expand=True)[0] .astype(int).div(1000.0))
-df["det_layer"] = df["subdet"] + "_" + df["layer"].astype(str)
-reco_df = (df.pivot_table(index="mass_TeV", columns="det_layer",values="avg_time").sort_index(axis=1, key=lambda idx: [("VB","IB","OB").index(col.split("_")[0]) * 10 + int(col.split("_")[1]) for col in idx]))
-reco_df.index.name = "mass [TeV]"
+                    layer = decoder["layer"].value()
 
-pd.set_option("display.max_columns", None)
-print("========================================")
-print("Average Reconstructed Times")
-print(" ")
-print(reco_df.to_string(float_format="{:0.7f}".format))
-print(" ")
+                    x = hit.getPosition()[0]
+                    y = hit.getPosition()[1]
+                    z = hit.getPosition()[2]
+                    distance = np.sqrt(x**2 + y**2 + z**2)
+                    theta = np.arccos(z / distance)
 
-colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
-layers_order = reco_df.columns
-x_pos = range(len(layers_order))
-avg_pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/avgs_vs_layer.pdf"
-avg_pdf = PdfPages(avg_pdf_path)
-with PdfPages(avg_pdf_path) as pdf:
-    fig, ax = plt.subplots(figsize=(9,4.5))
-    for mass in reco_df.index:
-        y = reco_df.loc[mass].values
-        ax.plot(x_pos, y, marker='o',linewidth=1.6, label=f"{mass:.1f} TeV", color=colors.get(mass, 'k'))
-        ax.set_xticks(x_pos)
-    ax.set_xticklabels(layers_order, rotation=45, ha='right')
-    ax.set_xlabel("Tracker layer")
-    ax.set_ylabel("⟨t_corr⟩  [ns]")
-    ax.set_title("Average corrected time vs. detector layer")
-    ax.grid(alpha=0.3, linestyle='--', linewidth=0.5)
-    ax.legend(title="Stau mass")
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-        
+                    all_hits[sample][detector][layer].append((hit.getTime(), z, theta))
+            reader.close()
 
 
+################################# converting averages to dataframe to check before making plots ##########################
 
+get_avgs = False
 
-#################### Plotting ############################
+if get_avgs == True:
+    rows = []
+    for sample, det_dict in reco_info.items():
+        for subdet, layer_dict in det_dict.items():
+            for layer, hits in layer_dict.items():
+                times = [hit[0] for hit in hits]
+                
+                avg_time = sum(times) / len(times) if times else math.nan
+
+                rows.append(
+                    {
+                        "mass": sample,
+                        "subdet": subdet,
+                        "layer": layer,
+                        "avg_time": avg_time
+                    })
+
+    df = pd.DataFrame(rows)
+    pivot = df.pivot_table(index=["mass", "subdet"], columns="layer", values="avg_time")
+    df["mass_TeV"] = (df["mass"].str.split("_", expand=True)[0] .astype(int).div(1000.0))
+    df["det_layer"] = df["subdet"] + "_" + df["layer"].astype(str)
+    reco_df = (df.pivot_table(index="mass_TeV", columns="det_layer",values="avg_time").sort_index(axis=1, key=lambda idx: [("VB","IB","OB").index(col.split("_")[0]) * 10 + int(col.split("_")[1]) for col in idx]))
+    reco_df.index.name = "mass [TeV]"
+
+    pd.set_option("display.max_columns", None)
+    print("========================================")
+    print("Average Reconstructed Times")
+    print(" ")
+    print(reco_df.to_string(float_format="{:0.7f}".format))
+    print(" ")
+
+    colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
+    layers_order = reco_df.columns
+    x_pos = range(len(layers_order))
+    avg_pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/avgs_vs_layer.pdf"
+    avg_pdf = PdfPages(avg_pdf_path)
+    with PdfPages(avg_pdf_path) as pdf:
+        fig, ax = plt.subplots(figsize=(9,4.5))
+        for mass in reco_df.index:
+            y = reco_df.loc[mass].values
+            ax.plot(x_pos, y, marker='o',linewidth=1.6, label=f"{mass:.1f} TeV", color=colors.get(mass, 'k'))
+            ax.set_xticks(x_pos)
+        ax.set_xticklabels(layers_order, rotation=45, ha='right')
+        ax.set_xlabel("Tracker layer")
+        ax.set_ylabel("⟨t_corr⟩  [ns]")
+        ax.set_title("Average corrected time vs. detector layer")
+        ax.grid(alpha=0.3, linestyle='--', linewidth=0.5)
+        ax.legend(title="Stau mass")
+
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+            
+#################################################### Plotting ##########################################################
 plot_dir = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/"
 
 histograms = False
 vs_theta = False
-vs_z = False 
+vs_z = False
+bibstograms = True 
 colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
 
 pdf_path = os.path.join(plot_dir, "vs_theta.pdf") # CHANGE NAME HERE
@@ -273,6 +341,25 @@ with PdfPages(pdf_path) as pdf:
                     ax.set_title(f"{mass} TeV: {subdet} layer {layer}")
                     ax.set_ylabel("corrected time [ns]")
                     ax.set_xlabel("Theta [rad]")
+
+                if bibstograms == True:
+                    bib_triples = all_hits[sample][subdet][layer]
+                    if not bib_triples:
+                        continue
+
+                    bib_times, bib_z, bib_theta = zip(*bib_triples)
+                    bib_times = list(bib_times)
+                    bib_z = list(bib_z)
+                    bib_theta = list(bib_theta)
+
+                    ax.hist(bib_times, bins=100)
+                    signal_min = times.min()
+                    signal_max = times.max()
+                    ax.axvline(x=signal_min, color='r', linestyle='--')
+                    ax.axvline(x=signal_max, color='r', linestyle='--')
+                    ax.set_title(f"{mass} TeV: {subdet} layer {layer} [ALL HITS, BIB]")
+                    ax.set_ylabel("hits")
+                    ax.set_xlabel("corrected time [ns]")
 
                 fig.tight_layout()
                 pdf.savefig(fig)
