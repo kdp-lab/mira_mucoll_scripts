@@ -10,7 +10,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
+import pickle 
+import pathlib
+import argparse
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--rebuild", action="store_true", help="rescan the slcio files")
+args = parser.parse_args()
 
 ############# ESTIMATES ####################
 stau_masses = np.array([1, 2.5, 4, 4.5]) # in TeV. just using what we have rn in the tbl files, could do more
@@ -72,166 +78,202 @@ subdetectors = ["VB", "IB", "OB"]
 # rand = ROOT.TRandom3(0) 
 system_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
 stau_ids = [1000015, 2000015]
+num_files = 9
 
-# collecting info. Sample --> Detector --> Layer --> (Hit times, Hit z, Hit theta)
-reco_info = {sample: {
-    "VB": {
-        0: [],
-        1: [],
-        2: [],
-        3: [],
-        4: [],
-        5: [],
-        6: [],
-        7: [] 
-    },
-    "IB": {
-        0: [],
-        1: [],
-        2: [],
-   },
-    "OB": { 
-        0: [],
-        1: [],
-        2: [],
-   }
-} for sample in sample_names}
+CACHE = pathlib.Path("cache/reco_bib.pkl")
 
-bib = True
-all_hits = {sample: {
-    "VB": {
-        0: [],
-        1: [],
-        2: [],
-        3: [],
-        4: [],
-        5: [],
-        6: [],
-        7: []
+def build_analysis(sample_names, num_files, redo=False):
+
+    if CACHE.exists() and not redo:
+        print(f"Loading previous arrays from {CACHE}, not redoing full analysis")
+        with CACHE.open("rb") as f:
+            reco_info, all_hits = pickle.load(f)
+        return reco_info, all_hits
+    
+    
+    # collecting info. Sample --> Detector --> Layer --> (Hit times, Hit z, Hit theta)
+    reco_info = {sample: {
+        "VB": {
+            0: [],
+            1: [],
+            2: [],
+            3: [],
+            4: [],
+            5: [],
+            6: [],
+            7: [] 
+        },
+        "IB": {
+            0: [],
+            1: [],
+            2: [],
     },
-    "IB": {
-        0: [],
-        1: [],
-        2: []
-    },
-    "IB": {
-        0: [],
-        1: [],
-        2: []
+        "OB": { 
+            0: [],
+            1: [],
+            2: [],
     }
-} for sample in sample_names}
+    } for sample in sample_names}
 
-collection_mapping = {"VB": "VXDBarrelHits", 
-                      "VE": "VXDEndcapHits", 
-                      "IB": "ITBarrelHits", 
-                      "IE": "ITEndcapHits",
-                      "OB": "OTBarrelHits",
-                      "OE": "OTEndcapHits"}
+    bib = True
+    all_hits = {sample: {
+        "VB": {
+            0: [],
+            1: [],
+            2: [],
+            3: [],
+            4: [],
+            5: [],
+            6: [],
+            7: []
+        },
+        "IB": {
+            0: [],
+            1: [],
+            2: []
+        },
+        "OB": {
+            0: [],
+            1: [],
+            2: []
+        }
+    } for sample in sample_names}
 
-print("Analyzing reco files...")
-# for each of the masses we're looking at 
-for sample in sample_names:
-    reco_path = os.path.join(reco_dir, sample)
-    file_prefix = f"{sample}_reco"
-    # for each of the 500 files
-    for i in tqdm(range(9)): # TODO: cahnge back to 500 
-        file_name = f"{file_prefix}{i}.slcio"
-        file_path = os.path.join(reco_path, "no_bib/", file_name)
+    collection_mapping = {"VB": "VXDBarrelHits", 
+                        "VE": "VXDEndcapHits", 
+                        "IB": "ITBarrelHits", 
+                        "IE": "ITEndcapHits",
+                        "OB": "OTBarrelHits",
+                        "OE": "OTEndcapHits"}
 
-        if not os.path.isfile(file_path):
-            print(f"File not found: {file_path}")
-            continue
+    print("Analyzing reco files...")
+    # for each of the masses we're looking at 
+    for sample in sample_names:
+        reco_path = os.path.join(reco_dir, sample)
+        file_prefix = f"{sample}_reco"
+        # for each of the 500 files
+        for i in tqdm(range(num_files)): 
+            file_name = f"{file_prefix}{i}.slcio"
+            file_path = os.path.join(reco_path, "no_bib/", file_name)
+
+            if not os.path.isfile(file_path):
+                print(f"File not found: {file_path}")
+                continue
+            
+            reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
+            reader.open(file_path)
+
+            event = reader.readNextEvent()
+            if event is None:
+                print(f"No event in: {file_path}")
+                reader.close()
+                continue
         
-        reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
-        reader.open(file_path)
+            encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+            decoder = pyLCIO.UTIL.BitField64(encoding)
+    
+            # print(f"Analyzing {file_path}")
+            seen_staus = set()
+            mcp_collection = event.getCollection("MCParticle")
+            rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
+            relation = pyLCIO.UTIL.LCRelationNavigator(rel_collection)
 
-        event = reader.readNextEvent()
-        if event is None:
-            print(f"No event in: {file_path}")
+            # for one of the staus in the event. filtering for staus that are non-intermediate and unique
+            for mcp in mcp_collection:
+                if abs(mcp.getPDG()) not in stau_ids:
+                    continue 
+                if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
+                    continue
+                if mcp.id() in seen_staus:
+                    continue
+
+                stau_tracks = relation.getRelatedToObjects(mcp)
+                for track in stau_tracks:
+                    seen_layers = set()
+                    for hit in track.getTrackerHits():
+                        cellID = int(hit.getCellID0())
+                        decoder.setValue(cellID)
+
+                        detector = decoder["system"].value()
+                        detector_key = system_map[detector]
+                        layer = decoder["layer"].value()
+                        if (detector,layer) in seen_layers: 
+                            continue
+                        if detector in (2, 4, 6):
+                            continue
+                        seen_layers.add((detector,layer))
+
+                        hit_x_pos = hit.getPosition()[0] 
+                        hit_y_pos = hit.getPosition()[1] 
+                        hit_z_pos = hit.getPosition()[2] 
+
+                        distance = sqrt(hit_x_pos**2 + hit_y_pos**2 + hit_z_pos**2) 
+
+                        theta = np.arccos(hit_z_pos / distance)
+
+                        reco_info[sample][detector_key][layer].append((hit.getTime(), hit_z_pos, theta))
+                seen_staus.add(mcp.id())                                    
             reader.close()
-            continue
-       
-        encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
-        decoder = pyLCIO.UTIL.BitField64(encoding)
- 
-        # print(f"Analyzing {file_path}")
-        seen_staus = set()
-        mcp_collection = event.getCollection("MCParticle")
-        rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
-        relation = pyLCIO.UTIL.LCRelationNavigator(rel_collection)
-
-        # for one of the staus in the event. filtering for staus that are non-intermediate and unique
-        for mcp in mcp_collection:
-            if abs(mcp.getPDG()) not in stau_ids:
-                continue 
-            if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
-                continue
-            if mcp.id() in seen_staus:
-                continue
-
-            stau_tracks = relation.getRelatedToObjects(mcp)
-            for track in stau_tracks:
-                seen_layers = set()
-                for hit in track.getTrackerHits():
-                    cellID = int(hit.getCellID0())
-                    decoder.setValue(cellID)
-
-                    detector = decoder["system"].value()
-                    detector_key = system_map[detector]
-                    layer = decoder["layer"].value()
-                    if (detector,layer) in seen_layers: 
-                        continue
-                    if detector in (2, 4, 6):
-                        continue
-                    seen_layers.add((detector,layer))
-
-                    hit_x_pos = hit.getPosition()[0] 
-                    hit_y_pos = hit.getPosition()[1] 
-                    hit_z_pos = hit.getPosition()[2] 
-
-                    distance = sqrt(hit_x_pos**2 + hit_y_pos**2 + hit_z_pos**2) 
-
-                    theta = np.arccos(hit_z_pos / distance)
-
-                    reco_info[sample][detector_key][layer].append((hit.getTime(), hit_z_pos, theta))
-            seen_staus.add(mcp.id())                                    
-        reader.close()
 
 
         ###################################### BIB hits ##########################################
         if bib == True: 
             print("Analyzing all hits from BIB files...")
-            bib_file_path = os.path.join(reco_path, "bib/", file_name)
-            if not os.path.isfile(bib_file_path):
-                print(f"File not found: {bib_file_path}")
-                continue
-            reader.open(bib_file_path)
-            event = reader.readNextEvent()
-            if event is None:
-                print(f"No event in {bib_file_path}")
-                continue
-            
-            for detector, collection_name in collection_mapping.items():
-                if detector in ("VE", "IE", "OE"):
+            for i in tqdm(range(num_files)): 
+                file_name = f"{file_prefix}{i}.slcio"
+        
+                bib_file_path = os.path.join(reco_path, "bib/", file_name)
+                if not os.path.isfile(bib_file_path):
+                    print(f"File not found: {bib_file_path}")
                     continue
+    
+                reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
+                reader.open(file_path)
 
-                hit_collection = event.getCollection(collection_name)
-                for i in range(hit_collection.getNumberOfElements()):
-                    hit = hit_collection.getElementAt(i)
-                    hit_time = hit.getTime()
-                    cellID = int(hit.getCellID0())
-                    decoder.setValue(cellID)
+                event = reader.readNextEvent()
+                if event is None:
+                    print(f"No event in: {file_path}")
+                    reader.close()
+                    continue
+        
+                encoding = event.getCollection("ITBarrelHits").getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+                decoder = pyLCIO.UTIL.BitField64(encoding)
+    
+                reader.open(bib_file_path)
+                event = reader.readNextEvent()
+                if event is None:
+                    print(f"No event in {bib_file_path}")
+                    continue
+                
+                for detector, collection_name in collection_mapping.items():
+                    if detector in ("VE", "IE", "OE"):
+                        continue
 
-                    layer = decoder["layer"].value()
+                    hit_collection = event.getCollection(collection_name)
+                    for i in range(hit_collection.getNumberOfElements()):
+                        hit = hit_collection.getElementAt(i)
+                        hit_time = hit.getTime()
+                        cellID = int(hit.getCellID0())
+                        decoder.setValue(cellID)
 
-                    x = hit.getPosition()[0]
-                    y = hit.getPosition()[1]
-                    z = hit.getPosition()[2]
-                    distance = np.sqrt(x**2 + y**2 + z**2)
-                    theta = np.arccos(z / distance)
+                        layer = decoder["layer"].value()
 
-                    all_hits[sample][detector][layer].append((hit.getTime(), z, theta))
-            reader.close()
+                        x = hit.getPosition()[0]
+                        y = hit.getPosition()[1]
+                        z = hit.getPosition()[2]
+                        distance = np.sqrt(x**2 + y**2 + z**2)
+                        theta = np.arccos(z / distance)
+
+                        all_hits[sample][detector][layer].append((hit.getTime(), z, theta))
+                reader.close()
+        
+    print(f"Writing cache -> {CACHE}")
+    CACHE.parent.mkdir(exist_ok=True)
+    with CACHE.open("wb") as f:
+        pickle.dump((reco_info, all_hits), f, protocol=pickle.HIGHEST_PROTOCOL)
+    return reco_info, all_hits
+
+reco_info, all_hits = build_analysis(sample_names, num_files, redo=args.rebuild)
 
 
 ################################# converting averages to dataframe to check before making plots ##########################
@@ -300,7 +342,7 @@ vs_z = False
 bibstograms = True 
 colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
 
-pdf_path = os.path.join(plot_dir, "vs_theta.pdf") # CHANGE NAME HERE
+pdf_path = os.path.join(plot_dir, "all_hits_histograms.pdf") # CHANGE NAME HERE
 pdf = PdfPages(pdf_path)
 
 with PdfPages(pdf_path) as pdf:
@@ -352,15 +394,22 @@ with PdfPages(pdf_path) as pdf:
                     bib_z = list(bib_z)
                     bib_theta = list(bib_theta)
 
-                    ax.hist(bib_times, bins=100)
-                    signal_min = times.min()
-                    signal_max = times.max()
-                    ax.axvline(x=signal_min, color='r', linestyle='--')
+                    weights = np.full(len(bib_times), 1.0 /num_files)
+
+                    n, bins, _ = ax.hist(bib_times, bins=100, weights=weights)
+                    max_bin = n.max()
+                    signal_min = min(times)
+                    signal_max = max(times)
+                    ax.axvline(x=signal_min, color='r', linestyle='--', label='signal time region')
                     ax.axvline(x=signal_max, color='r', linestyle='--')
                     ax.set_title(f"{mass} TeV: {subdet} layer {layer} [ALL HITS, BIB]")
-                    ax.set_ylabel("hits")
+                    ax.legend()
+                    ax.set_ylabel("average hits per event")
                     ax.set_xlabel("corrected time [ns]")
+                    ax.text(0.97,0.03, f"max hits {max_bin:.0f}", transform=ax.transAxes, ha="right", va="bottom", bbox=dict(boxstyle="round,pad=0.25",facecolor="white", alpha=0.6))
 
                 fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)
+
+print(f"Wrote plot(s) to {pdf_path}")
