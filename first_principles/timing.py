@@ -18,15 +18,20 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--rebuild", action="store_true", help="rescan the slcio files")
 parser.add_argument("--get_avgs", action="store_true", help="get the average hit time values from all the files, print out a chart")
 parser.add_argument("--bib_reco", action="store_true", help="analyze all signals from bib reco files") # have to add this if you want to plot bib stuff 
+parser.add_argument("--num_files", type=int, default=500, help="how many .slcio files to analyse per sample")
 
 parser.add_argument("--histograms", action="store_true", help="plot time distributions for each layer, detector signal")
 parser.add_argument("--signal_vs_theta", action="store_true", help="plot times vs theta for each layer, detector")
 parser.add_argument("--signal_vs_z", action="store_true", help="plot times vs z coord for each layer, detector")
+parser.add_argument("--signal_z_hist", action="store_true", help="plot avg hits per layer by z coordinate") 
+parser.add_argument("--signal_theta_hist", action="store_true", help="plot avg hits per layer by theta coordinate")
 
 parser.add_argument("--bib_vs_theta", action="store_true", help="plot bib times versus theta")
 parser.add_argument("--bib_vs_z", action="store_true", help="plot bib times versus z")
 parser.add_argument("--bibstograms", action="store_true", help="plot all hits time distributions with signal windows marked")
-parser.add_argument("--num_files", type=int, default=500, help="how many .slcio files to analyse per sample")
+
+parser.add_argument("--signal_occ", action="store_true", help="plot signal occupancy")
+parser.add_argument("--bib_occ", action="store_true", help="plot bib occupancy")
 
 args = parser.parse_args()
 
@@ -40,6 +45,10 @@ signal_vs_z = args.signal_vs_z
 bibstograms = args.bibstograms
 bib_vs_theta = args.bib_vs_theta
 bib_vs_z = args.bib_vs_z
+signal_z_hist = args.signal_z_hist
+signal_theta_hist = args.signal_theta_hist
+signal_occ = args.signal_occ
+bib_occ = args.bib_occ
 
 ############# ESTIMATES ####################
 stau_masses = np.array([1, 2.5, 4, 4.5]) # in TeV. just using what we have rn in the tbl files, could do more
@@ -104,15 +113,44 @@ stau_ids = [1000015, 2000015]
 
 CACHE = pathlib.Path("cache/reco_bib.pkl")
 
+plot_dir = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/"
+colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
+
+pdf_path = os.path.join(plot_dir, "signal_theta_hist.pdf") # CHANGE NAME HERE
+pdf = PdfPages(pdf_path)
+
+# following according to https://github.com/madbaron/LCIOmacros/blob/master/study_occupancy.py
+layer_area_dict = {
+        "VB": {
+            0: 270.40,
+            1: 270.40,
+            2: 448.50,
+            3: 448.50,
+            4: 655.20,
+            5: 655.20,
+            6: 904.80,
+            7: 904.80 
+        },
+        "IB": {
+            0: 8117.85,
+            1: 22034.16,
+            2: 51678.81,
+    },
+        "OB": { 
+            0: 140032.91,
+            1: 194828.39,
+            2: 249623.88,
+        }
+} 
+
 def build_analysis(sample_names, num_files, redo=False):
 
     if CACHE.exists() and not redo:
         print(f"Loading previous arrays from {CACHE}, not redoing full analysis")
         with CACHE.open("rb") as f:
             reco_info, all_hits = pickle.load(f)
-        return reco_info, all_hits
-    
-    
+        return reco_info, all_hits 
+
     # collecting info. Sample --> Detector --> Layer --> (Hit times, Hit z, Hit theta)
     reco_info = {sample: {
         "VB": {
@@ -243,7 +281,7 @@ def build_analysis(sample_names, num_files, redo=False):
             for i in tqdm(range(num_files)): 
                 file_name = f"{file_prefix}{i}.slcio"
         
-                bib_file_path = os.path.join(reco_path, "bib/tight", file_name)
+                bib_file_path = os.path.join(reco_path, "bib/no_timing", file_name)
                 if not os.path.isfile(bib_file_path):
                     print(f"File not found: {bib_file_path}")
                     continue
@@ -353,11 +391,6 @@ if get_avgs == True:
         plt.close(fig)
             
 #################################################### Plotting ##########################################################
-plot_dir = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/"
-colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
-
-pdf_path = os.path.join(plot_dir, "tight_bib_vs_z.pdf") # CHANGE NAME HERE
-pdf = PdfPages(pdf_path)
 
 with PdfPages(pdf_path) as pdf:
     for sample in sample_names:
@@ -368,6 +401,7 @@ with PdfPages(pdf_path) as pdf:
             else:
                 num_layers = 3
 
+            signal_occupancy_list = []
             for layer in range(num_layers):
                 triples = reco_info[sample][subdet][layer]
                 if not triples:
@@ -379,6 +413,7 @@ with PdfPages(pdf_path) as pdf:
                 signal_theta = list(signal_theta)
                 
                 fig, ax = plt.subplots()
+
                 if histograms == True:
                     ax.hist(signal_times, bins=100, histtype="stepfilled")
                     ax.axvline(x=stau_tof_df.loc[mass, f"{subdet}_{layer}"], color='r', linestyle = '--')
@@ -398,7 +433,35 @@ with PdfPages(pdf_path) as pdf:
                     ax.set_ylabel("corrected time [ns]")
                     ax.set_xlabel("Theta [rad]")
 
+                if signal_z_hist == True: 
+                    zs = np.asarray(signal_z)
+                    edges = np.linspace(-70,70, 140+1)
+                    weights = np.full_like(zs, 1.0/num_files)
+                    centers = 0.5*(edges[1:] + edges[:-1])
 
+                    hits, _ = np.histogram(zs, bins=edges, weights=weights)
+                    
+                    ax.bar(centers, hits, width=np.diff(edges))
+
+                    ax.set_title(f"{mass} TeV: {subdet} layer {layer} [SIGNAL]")
+                    ax.set_ylabel("Average hits per event")
+                    ax.set_xlabel("z coordinate [mm]")
+
+                if signal_theta_hist == True:
+                    thetas = np.asarray(signal_theta) 
+                    edges = np.linspace(0, np.pi, 90+1)
+                    weights = np.full_like(thetas, 1.0 / num_files)
+                    centers = 0.5*(edges[1:] + edges[:-1])
+
+                    hits, _ = np.histogram(thetas, bins=edges, weights=weights)
+
+                    ax.bar(centers, hits, width=np.diff(edges))
+
+                    ax.set_title(f"{mass} TeV: {subdet} layer {layer} [SIGNAL]")
+                    ax.set_ylabel("Average hits per event")
+                    ax.set_xlabel("Theta [rad]")
+
+                
                 if bib == True:
                     bib_triples = all_hits[sample][subdet][layer]
                     if not bib_triples:
@@ -473,3 +536,79 @@ with PdfPages(pdf_path) as pdf:
                 plt.close(fig)
 
 print(f"Wrote plot(s) to {pdf_path}")
+
+
+########################################### Occupancy plotting ############################################
+
+if signal_occ == True:
+    occupancy_pdf_path =  os.path.join(plot_dir, "signal_occupancy_all_mass.pdf") # CHANGE NAME HERE
+    layers_order = [f"{d}_{l}" 
+                    for d in ("VB", "IB", "OB") 
+                    for l in (range(8) if d=="VB" else range(3))]
+    xpos = np.arange(len(layers_order))
+
+    with PdfPages(occupancy_pdf_path) as pdf:
+        fig, ax = plt.subplots()
+        
+        for sample in sample_names:
+            mass = int(sample.split("_")[0]) / 1000.0 
+            signal_occupancy_list = np.zeros(len(layers_order))
+            
+            for j, tag in enumerate(layers_order):
+                subdet, layer = tag.split("_")
+                layer = int(layer)
+                triples = reco_info[sample][subdet][layer]
+                if triples:
+                    n_hits_event = len(triples) / num_files
+                    area_cm2 = layer_area_dict[subdet][layer]
+                    signal_occupancy_list[j] = n_hits_event / area_cm2                    
+ 
+            ax.step(xpos, signal_occupancy_list, where="mid", color=colors.get(mass, 'k'), label=f"{mass:.1f} TeV")
+        ax.set_xticks(xpos)
+        ax.set_xticklabels(layers_order, rotation=45, ha='right')
+        ax.set_xlabel("Tracker Layer")
+        ax.set_ylabel("Signal Occupancy (Hits / cm^2 /event)")
+        ax.set_title("Signal Hit Occupancy by Tracker Layer")
+        ax.legend(title="Stau mass")
+        ax.set_yscale("log")
+
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+if bib_occ == True:
+    occupancy_pdf_path = os.path.join(plot_dir, "bib_occupancy.pdf")
+    layers_order = [f"{d}_{l}" 
+                    for d in ("VB", "IB", "OB") 
+                    for l in (range(8) if d=="VB" else range(3))]
+    xpos = np.arange(len(layers_order))
+ 
+    with PdfPages(occupancy_pdf_path) as pdf:
+        fig, ax = plt.subplots()
+        mass = 4.0
+        bib_occupancy_list = np.zeros(len(layers_order))
+        for j, tag in enumerate(layers_order): 
+            subdet, layer = tag.split("_")
+            layer = int(layer)
+            triples = all_hits["4000_10"][subdet][layer]
+            if triples:
+                n_hits_event = len(triples) / num_files
+                area_cm2 = layer_area_dict[subdet][layer]
+                bib_occupancy_list[j] = n_hits_event /  area_cm2
+        ax.step(xpos, bib_occupancy_list, where="mid")
+        ax.set_xticks(xpos)
+        ax.set_xticklabels(layers_order, rotation=45, ha='right')
+        ax.set_xlabel("Tracker Layer")
+        ax.set_ylabel("BIB Occupancy (Hits / cm^2 /event)")
+        ax.set_title("BIB Hit Occupancy by Tracker Layer") 
+
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+   
+
+        
+        
+
+
+print(f"Wrote plot(s) to {occupancy_pdf_path}")
