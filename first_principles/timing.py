@@ -26,9 +26,11 @@ parser.add_argument("--signal_vs_z", action="store_true", help="plot times vs z 
 parser.add_argument("--bib_vs_theta", action="store_true", help="plot bib times versus theta")
 parser.add_argument("--bib_vs_z", action="store_true", help="plot bib times versus z")
 parser.add_argument("--bibstograms", action="store_true", help="plot all hits time distributions with signal windows marked")
+parser.add_argument("--num_files", type=int, default=500, help="how many .slcio files to analyse per sample")
 
 args = parser.parse_args()
 
+num_files = args.num_files
 bib = args.bib_reco
 get_avgs = args.get_avgs
 redo = args.rebuild
@@ -99,7 +101,6 @@ subdetectors = ["VB", "IB", "OB"]
 # rand = ROOT.TRandom3(0) 
 system_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
 stau_ids = [1000015, 2000015]
-num_files = 9
 
 CACHE = pathlib.Path("cache/reco_bib.pkl")
 
@@ -242,7 +243,7 @@ def build_analysis(sample_names, num_files, redo=False):
             for i in tqdm(range(num_files)): 
                 file_name = f"{file_prefix}{i}.slcio"
         
-                bib_file_path = os.path.join(reco_path, "bib/", file_name)
+                bib_file_path = os.path.join(reco_path, "bib/tight", file_name)
                 if not os.path.isfile(bib_file_path):
                     print(f"File not found: {bib_file_path}")
                     continue
@@ -355,7 +356,7 @@ if get_avgs == True:
 plot_dir = "/scratch/miralittmann/analysis/mira_analysis_code/first_principles/plots/"
 colors = {1.0: 'r', 2.5: 'g', 4.0: 'b', 4.5: 'c'}
 
-pdf_path = os.path.join(plot_dir, "bib_vs_z.pdf") # CHANGE NAME HERE
+pdf_path = os.path.join(plot_dir, "tight_bib_vs_z.pdf") # CHANGE NAME HERE
 pdf = PdfPages(pdf_path)
 
 with PdfPages(pdf_path) as pdf:
@@ -425,29 +426,46 @@ with PdfPages(pdf_path) as pdf:
                         ax.set_xlabel("corrected time [ns]")
                         ax.text(0.97,0.03, f"max hits {max_bin:.0f}", transform=ax.transAxes, ha="right", va="bottom", bbox=dict(boxstyle="round,pad=0.25",facecolor="white", alpha=0.6))
 
-                        if subdet == "VB":
-                            ax.set_xlim(0,0.32)
-                        elif subdet == "IB":
-                            ax.set_xlim(0,3)
-                            ax.set_ylim(top=1000)
-                        else: 
-                            ax.set_xlim(0,8)
-                            ax.set_ylim(top=1000)
+                        # if subdet == "VB":
+                        #     ax.set_xlim(0,0.32)
+                        # elif subdet == "IB":
+                        #     ax.set_xlim(0,3)
+                        #     ax.set_ylim(top=1000)
+                        # else: 
+                        #     ax.set_xlim(0,8)
+                        #     ax.set_ylim(top=1000)
 
                     if bib_vs_theta == True:
-                        if sample != "1000_10": # because this should be the same for every mass ?
+                        if sample != "4000_10": # because this should be the same for every mass ?
                             continue
-                        ax.scatter(bib_theta, bib_times)
+                        thetas = np.asarray(bib_theta) 
+                        edges = np.linspace(0, np.pi, 90+1)
+                        weights = np.full_like(thetas, 1.0 / num_files)
+                        centers = 0.5*(edges[1:] + edges[:-1])
+
+                        hits, _ = np.histogram(thetas, bins=edges, weights=weights)
+
+                        ax.bar(centers, hits, width=np.diff(edges))
+
                         ax.set_title(f"{mass} TeV: {subdet} layer {layer} [ALL HITS, BIB]")
-                        ax.set_ylabel("corrected time [ns]")
+                        ax.set_ylabel("Average hits per event")
                         ax.set_xlabel("Theta [rad]")
 
                     if bib_vs_z == True:
-                        if sample != "1000_10": # because this should be the same for every mass ?
+                        if sample != "4000_10": # because this should be the same for every mass ?
                             continue
-                        ax.scatter(bib_z, bib_times)
+                        
+                        zs = np.asarray(bib_z)
+                        edges = np.linspace(-70,70, 140+1)
+                        weights = np.full_like(zs, 1.0/num_files)
+                        centers = 0.5*(edges[1:] + edges[:-1])
+
+                        hits, _ = np.histogram(zs, bins=edges, weights=weights)
+                        
+                        ax.bar(centers, hits, width=np.diff(edges))
+
                         ax.set_title(f"{mass} TeV: {subdet} layer {layer} [ALL HITS, BIB]")
-                        ax.set_ylabel("corrected time [ns]")
+                        ax.set_ylabel("Average hits per event")
                         ax.set_xlabel("z coordinate [mm]")
 
                 fig.tight_layout()
