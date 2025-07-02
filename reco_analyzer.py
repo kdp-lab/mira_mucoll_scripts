@@ -38,9 +38,9 @@ stau_ids = [1000015, 2000015]
 rand = ROOT.TRandom3(0)    
 
 ### input files ###
-in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/bib/tight/4500_10/"
-save_path = "/scratch/miralittmann/analysis/efficiency_v1/bib/tight/4500_10/"
-file_name = "4500_10" 
+in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/nobib/medium/1000_10/"
+save_path = "/scratch/miralittmann/analysis/efficiency_v1/nobib/medium/1000_10/"
+file_name = "1000_10" 
 chunk = args.chunk
 in_file = f"{in_path}{file_name}_reco{chunk}.slcio"
 out_file = f"{save_path}{file_name}_reco{chunk}.json"
@@ -109,6 +109,9 @@ for event in event_looper(reader, args.all_events):
             continue 
         if mcp.id() in seen_staus:
             continue
+        if mcp.getGeneratorStatus == 22:
+            print("intermediate stau")
+            continue
         n_truth_staus +=1 # already did this in sim-only analysis, but maybe can serve as sanity check
         reco_success = False
 
@@ -126,6 +129,7 @@ for event in event_looper(reader, args.all_events):
         mcp_phi = mcp_stau_tlv.Phi()
         mcp_theta = mcp_stau_tlv.Theta()
         
+        print(len(stau_tracks))
         for track in stau_tracks:
             track_hits = {s:{f:[] for f in hit_fields} for s in systems}
             seen_layers = set() # making an empty set that we can add the layers to as we go through them so that we aren't double counting hits

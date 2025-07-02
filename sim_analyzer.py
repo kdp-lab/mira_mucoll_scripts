@@ -25,9 +25,9 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/sim_try1/"
-out_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/7-20/"
-sample = "4000_10"
+in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/sim/efficiency/2500_10/"
+out_path = "/scratch/miralittmann/analysis/efficiency_v1/sim/2500_10/"
+sample = "2500_10"
 chunk = args.chunk
 in_file = f"{in_path}{sample}_sim{chunk}.slcio"
 out_file = f"{out_path}{sample}_sim{chunk}.json"
@@ -87,25 +87,30 @@ systems_key  = ["VB", "VE", "IB", "IE", "OB", "OE"]
 fields = ["id", "pdg", "x", "y", "z", "time", "layer", "stau"]
 
 hit_info = {key: {f: [] for f in fields} for key in systems_key}
+n_accepted_staus = 0
+n_truth_staus = 0
 
-for evt_idx, event in enumerate(event_looper(reader, args.all_events)): 
-    # total stau count
-    n_truth_staus = 0
+for evt_idx, event in enumerate(event_looper(reader, args.all_events)):   
     ### MCP information ###
     mcps = event.getCollection("MCParticle")
-    for mcp in mcps:
-        mcp_stau_info["event"].append(evt_idx)
-        # skipping staus that have stau parents (intermediate staus) and particles that aren't staus
+    for mcp in mcps: 
+        # skipping staus that have stau parents, staus that decay immediately, and particles that aren't staus
         if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
             continue
         if abs(mcp.getPDG()) not in stau_ids:
             continue
+        if mcp.getGeneratorStatus == 22:
+            print("intermediate stau")
+            continue
+        
         n_truth_staus +=1
 
         mcp_stau_momentum = mcp.getMomentum() 
         mcp_stau_tlv = ROOT.TLorentzVector()
         mcp_stau_tlv.SetPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
         mcp_stau_beta = mcp_stau_tlv.Beta()
+        mcp_stau_endpoint_r = sqrt(mcp.getEndpoint()[0] ** 2 + mcp.getEndpoint()[1] ** 2)
+        mcp_stau_endpoint_z = mcp.getEndpoint()[2] 
 
         mcp_stau_info["id"].append(mcp.id())        
         mcp_stau_info["p_tot"].append(mcp_stau_tlv.Mag())
@@ -120,6 +125,10 @@ for evt_idx, event in enumerate(event_looper(reader, args.all_events)):
         mcp_stau_info["phi"].append(mcp_stau_tlv.Phi())
         mcp_stau_info["theta"].append(mcp_stau_tlv.Theta())
         mcp_stau_info["travel_distance"].append(sqrt(mcp.getEndpoint()[0]**2 + mcp.getEndpoint()[1]**2 + mcp.getEndpoint()[2]**2) - sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2 + mcp.getVertex()[2]**2))
+        
+        print(mcp_stau_endpoint_r)
+        if mcp_stau_endpoint_r > 102.0 and abs(mcp_stau_tlv.Eta()) < 1.0:
+            n_accepted_staus += 1
 
     ### Track information ###
     for system, key in systems:
@@ -148,7 +157,8 @@ for evt_idx, event in enumerate(event_looper(reader, args.all_events)):
             hit_info[key]["layer"].append(layer)
 reader.close()
 print("Total number of truth staus per event:", n_truth_staus)
+print("Accepted staus per event:", n_accepted_staus)
 
-all_data = {"hit_info": hit_info, "mcp_stau_info": mcp_stau_info}
+all_data = {"hit_info": hit_info, "mcp_stau_info": mcp_stau_info, "n_accepted_staus": n_accepted_staus}
 with open(out_file, "w") as f:
     json.dump(all_data, f, indent=2, sort_keys=True)
