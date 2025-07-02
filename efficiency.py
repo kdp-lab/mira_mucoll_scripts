@@ -35,13 +35,21 @@ for sim_file in os.listdir(sim_path):
         
     with open(os.path.join(sim_path, sim_file)) as file:
         chunk_sim_data = json.load(file)
-        total_files_processed += 1
+        total_files_processed += 1 
         event_data = {
             'file': sim_file,
             'truth_staus': chunk_sim_data["mcp_stau_info"]["id"],
-            'hit_info': chunk_sim_data["hit_info"]
+            'hit_info': chunk_sim_data["hit_info"],
+            'accepted_staus': chunk_sim_data["n_accepted_staus"]
         }
         events_data.append(event_data)
+
+total_accepted_staus = 0
+for i in range(len(events_data)):
+    accepted_stau_per_event = events_data[i]["accepted_staus"]
+    total_accepted_staus += accepted_stau_per_event
+print(total_accepted_staus)
+
 
 print(f"Files processed: {total_files_processed}")
 print(f"Total events: {len(events_data)}")
@@ -49,38 +57,9 @@ print(f"Total events: {len(events_data)}")
 total_truth_staus = sum(len(event['truth_staus']) for event in events_data)
 print(f"Total truth staus: {total_truth_staus}")
 
-total_accepted_staus = 0
-total_staus_with_any_tracker_hit = 0
-
-for event_idx, event in enumerate(events_data):
-    event_stau_hits = defaultdict(list)
-    for system in ["VB", "VE", "IB", "IE", "OB", "OE"]:
-        hits = event['hit_info'][system]
-        for i in range(len(hits['id'])):
-            if hits['pdg'][i] in stau_ids:
-                stau_id = hits['id'][i]
-                event_stau_hits[stau_id].append({
-                    'system': system,
-                    'layer': hits['layer'][i],
-                    'x': hits['x'][i],
-                    'y': hits['y'][i],
-                    'z': hits['z'][i],
-                    'pdg': hits['pdg'][i]
-                })
-    total_staus_with_any_tracker_hit += len(event_stau_hits)
-
-    accepted_in_this_event = set()
-    for stau_id, hits in event_stau_hits.items():
-        ib_hits = [hit for hit in hits if hit['system'] == 'IB']
-        if ib_hits:
-            min_layer = min(hit['layer'] for hit in ib_hits)
-            if min_layer <= 0:  
-                accepted_in_this_event.add(stau_id)
-    total_accepted_staus += len(accepted_in_this_event)
 
 print(f"\n=== (SIM) ===")
 print(f"Total truth staus: {total_truth_staus}")
-print(f"Total staus with any tracker hit: {total_staus_with_any_tracker_hit}")
 print(f"Total accepted staus: {total_accepted_staus}")
 if total_truth_staus > 0:
     acceptance_rate = total_accepted_staus / total_truth_staus * 100
