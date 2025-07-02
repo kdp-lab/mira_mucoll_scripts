@@ -25,9 +25,9 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/sim/efficiency/2500_10/"
-out_path = "/scratch/miralittmann/analysis/efficiency_v1/sim/2500_10/"
-sample = "2500_10"
+in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/sim/efficiency/4500_10/"
+out_path = "/scratch/miralittmann/analysis/efficiency_v1/sim/4500_10/"
+sample = "4500_10"
 chunk = args.chunk
 in_file = f"{in_path}{sample}_sim{chunk}.slcio"
 out_file = f"{out_path}{sample}_sim{chunk}.json"
