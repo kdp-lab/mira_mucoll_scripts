@@ -3,37 +3,8 @@ import os
 import numpy as np
 from collections import defaultdict
 
-reco_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/reco/7-18/"
-sim_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/7-18/"
-
-def get_chunk_id(fname:str) -> int:
-    base = os.path.basename(fname)
-    name = base.split(".", 1)[0]
-    tail = name.split("_")[-1]
-    digits = ''.join(ch for ch in tail if ch.isdigit())
-    return int(digits)
-
-bad_chunks = set()
-for reco_file in os.listdir(reco_path):
-    with open(os.path.join(reco_path, reco_file)) as file:
-        chunk_reco_data = json.load(file)
-        if get_chunk_id(reco_file) in chunk_reco_data.get("bad_files", []):
-            bad_chunks.add(get_chunk_id(reco_file))
-
-print(f"Bad chunks to exclude: {len(bad_chunks)}")
-
-stau_ids = {1000015, -1000015, 2000015, -2000015}
-
-events_data = []
-total_files_processed = []
-
-import json
-import os
-import numpy as np
-from collections import defaultdict
-
-sim_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/sim/7-18/"
-reco_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/reco/7-18/"
+sim_path = "/scratch/miralittmann/analysis/efficiency_v1/sim/1000_10/"
+reco_path = "/scratch/miralittmann/analysis/efficiency_v1/nobib/medium/1000_10/"
 
 def get_chunk_id(fname: str) -> int:
     base = os.path.basename(fname)
@@ -52,10 +23,8 @@ for reco_file in os.listdir(reco_path):
 
 print(f"Bad chunks to exclude: {len(bad_chunks)}")
 
-# Load data similar to your current approach but track events separately
 stau_ids = {1000015, -1000015, 2000015, -2000015}
 
-# Store data per event (file)
 events_data = []
 total_files_processed = 0
 
@@ -118,8 +87,9 @@ if total_truth_staus > 0:
     print(f"Acceptance rate: {acceptance_rate:.2f}%")
 
 total_reco_staus = 0
+print(reco_path)
 for reco_file in os.listdir(reco_path):
-    with open(os.path.join(reco_path, reco_file)) as file:
+    with open(os.path.join(reco_path, reco_file)) as file: 
         reco_data = json.load(file)
         if get_chunk_id(reco_file) in bad_chunks: 
             continue 

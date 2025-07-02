@@ -38,9 +38,9 @@ stau_ids = [1000015, 2000015]
 rand = ROOT.TRandom3(0)    
 
 ### input files ###
-in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco_try1/"
-save_path = "/scratch/miralittmann/analysis/10pbibjson/4000_10/medium_window/reco/7-18/"
-file_name = "4000_10" 
+in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/bib/tight/4500_10/"
+save_path = "/scratch/miralittmann/analysis/efficiency_v1/bib/tight/4500_10/"
+file_name = "4500_10" 
 chunk = args.chunk
 in_file = f"{in_path}{file_name}_reco{chunk}.slcio"
 out_file = f"{save_path}{file_name}_reco{chunk}.json"
