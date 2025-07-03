@@ -1,0 +1,1 @@
+For analysis, I do sim_analyzer and reco_analyzer to turn the .slcio files into jsons. In the sim_analyzer I impose acceptance cuts and in the reco_analyzer I impose reduced chi^2 cuts. Then for plotting/efficiency calculation I put these jsons into efficiency.py. timing.py was for first principles calculations
