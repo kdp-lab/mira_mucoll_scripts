@@ -6,6 +6,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import argparse
 import pickle
 import pathlib
+from tqdm import tqdm
 
 sim_dir = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency/sim/"
 reco_dir = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency/"
@@ -69,13 +70,16 @@ def build_analysis(redo=False):
             track_eff_data, all_data = pickle.load(f)
         return track_eff_data, all_data            
 
-    for window in windows:
+    print("Rebuilding analysis arrays...")
+    for window in tqdm(windows):
         for option in bib_options: 
             for sample in samples:
                 sim_path = os.path.join(sim_dir, sample)
                 reco_path = os.path.join(reco_dir, option, window, sample)
                 
                 events_data = []
+
+                ##################################### setup + acceptance (from sim info) #############################
                 for sim_file in os.listdir(sim_path):
 
                 # Get bad chunks
@@ -107,23 +111,20 @@ def build_analysis(redo=False):
                 for i in range(len(events_data)):
                     accepted_stau_per_event = events_data[i]["accepted_staus"]
                     total_accepted_staus += accepted_stau_per_event
-                
-                print(f" ")
-                print(f"\n {window},{sample},{option}")
-                print(total_accepted_staus)
-                print(f"Files processed: {total_files_processed}")
-                print(f"Total events: {len(events_data)}")
+                 
+                print(f"\n ====================================================================")
+                print(f"{window} window, {sample}, {option}")  
+                print(f"Total events in files: {len(events_data)}")
 
                 total_truth_staus = sum(len(event['truth_staus']) for event in events_data)
-                print(f"Total truth staus: {total_truth_staus}")
-                print(f"\n === (SIM)  ===")
+                print(f"\n ========= sim ============")
                 print(f"Total truth staus: {total_truth_staus}")
                 print(f"Total accepted staus: {total_accepted_staus}")
                 if total_truth_staus > 0:
                     acceptance_rate = total_accepted_staus / total_truth_staus * 100
                     print(f"Acceptance rate: {acceptance_rate:.2f}%")
 
-                
+                ################################### tracking efficiency ######################################### 
                 good_reco_tracks = 0 
 
                 for reco_file in os.listdir(reco_path):
@@ -140,15 +141,30 @@ def build_analysis(redo=False):
                                 good_reco_tracks +=1 
      
                 efficiency =  good_reco_tracks / total_accepted_staus * 100
-                print(f"\n=== (RESULTS:) ===")
-                print(f"Efficiency: {efficiency:.2f}%")
-                print(f"Good tracks: {good_reco_tracks}")  
+                print(f"\n ========== reco: track efficiency ==========")
+                print(f"Efficiency: {efficiency:.2f}%") 
                                 
                 track_eff_data[window][sample]["acceptance"].append(acceptance_rate)
                 if option == "bib/": 
                     track_eff_data[window][sample]["trackeff_bib"].append(efficiency)
                 else:
                     track_eff_data[window][sample]["trackeff_nobib"].append(efficiency)
+
+
+                ################################## hit-based efficiency ########################################
+                
+                # getting travel distance about the stau from sim (truth level), then calculating how many hits that should give it
+                # for sim_file in os.listdir(sim_path):
+                #     if get_chunk_id(sim_file) in bad_chunks:
+                #         continue
+                #     with open(os.path.join(sim_path, sim_file)) as file:
+                #         all_sim_data = json.load(file)
+                #         # for ???????
+                #         distance = all_sim_data["mcp_stau_info"]["travel_distance"]
+                        
+
+                        
+
     
     print(f"Writing cache to {CACHE}")
     CACHE.parent.mkdir(exist_ok=True)
