@@ -7,6 +7,8 @@ import json
 from math import *
 import numpy as np
 import argparse
+import pickle
+import pathlib
 
 # Set up the argument parser
 parser = argparse.ArgumentParser(description="Analyze SLCIO chunks.")
@@ -21,6 +23,13 @@ parser.add_argument(
     action='store_true',       
     help='Loop over every event in the chunk instead of only the first.'
 )
+parser.add_argument(
+    "--sample",
+    type=str,
+    required=True,
+    help="sample to analyze"
+)
+
 def event_looper(reader, all_events):
     if all_events:
         yield from reader
@@ -30,6 +39,8 @@ def event_looper(reader, all_events):
             break
 # Parse the arguments
 args = parser.parse_args()
+sample = args.sample
+chunk = args.chunk
 
 ### constants ###
 Bfield = 3.57
@@ -38,15 +49,10 @@ stau_ids = [1000015, 2000015]
 rand = ROOT.TRandom3(0)    
 
 ### input files ###
-in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/nobib/tight/4500_10/"
-save_path = "/scratch/miralittmann/analysis/efficiency_v1/nobib/tight/4500_10/"
-file_name = "4500_10" 
-chunk = args.chunk
-in_file = f"{in_path}{file_name}_reco{chunk}.slcio"
-out_file = f"{save_path}{file_name}_reco{chunk}.json"
+
+in_file = f"{sample}_reco{chunk}.slcio"
+out_file = f"{sample}_reco{chunk}.json"
 print("looking for chunk", chunk)
-file_name = glob.glob(in_file)
-print("found %i files:"%len(file_name), in_file)
 
 #### MAKE BIG EMPTY LISTS #### 
 
@@ -83,7 +89,7 @@ match_track_info = {
 }
 
 reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
-reader.open(file_name)
+reader.open(in_file)
 
 seen_staus = set()
 n_truth_staus = 0

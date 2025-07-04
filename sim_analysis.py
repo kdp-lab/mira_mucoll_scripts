@@ -1,4 +1,3 @@
-## (attempting to) make a script that only deals with the sim files, gives you an overview of the information in them directly before digi/reco
 
 import pyLCIO
 from pyLCIO import UTIL
@@ -13,24 +12,33 @@ import argparse
 
 parser = argparse.ArgumentParser(description="Analyze SLCIO chunks.")
 parser.add_argument(
-    '--chunk', 
-    type=int, 
-    required=True, 
-    help="The chunk number to analyze"
-)
-parser.add_argument(
     '--all-events',            
     action='store_true',       
     help='Loop over every event in the chunk instead of only the first.'
 )
-args = parser.parse_args()
 
-in_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/sim/efficiency/4500_10/"
-out_path = "/scratch/miralittmann/analysis/efficiency_v1/sim/4500_10/"
-sample = "4500_10"
+parser.add_argument(
+    '--sample', 
+    type=str, 
+    required=True, 
+    help="Sample number to analyze"
+)
+
+parser.add_argument(
+    "--chunk",
+    type=int,
+    required=True,
+    help="chunk number to analyze"
+)
+
+args = parser.parse_args()
+sample = args.sample
+# in_path = f"/ospool/uc-shared/project/futurecolliders/miralittmann/sim/efficiency/{sample}/"
+# out_path = f"/scratch/miralittmann/analysis/efficiency_v1/sim/{sample}/"
+
 chunk = args.chunk
-in_file = f"{in_path}{sample}_sim{chunk}.slcio"
-out_file = f"{out_path}{sample}_sim{chunk}.json"
+in_file = f"{sample}_sim{chunk}.slcio"
+out_file = f"{sample}_sim{chunk}.json"
 
 ## constants ##
 stau_ids = [1000015, 2000015]
@@ -94,24 +102,32 @@ for evt_idx, event in enumerate(event_looper(reader, args.all_events)):
     ### MCP information ###
     mcps = event.getCollection("MCParticle")
     for mcp in mcps: 
-        # skipping staus that have stau parents, staus that decay immediately, and particles that aren't staus
-        if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
-            continue
-        if abs(mcp.getPDG()) not in stau_ids:
-            continue
-        if mcp.getGeneratorStatus == 22:
-            print("intermediate stau")
-            continue
-        
-        n_truth_staus +=1
-
         mcp_stau_momentum = mcp.getMomentum() 
         mcp_stau_tlv = ROOT.TLorentzVector()
         mcp_stau_tlv.SetPxPyPzE(mcp_stau_momentum[0], mcp_stau_momentum[1], mcp_stau_momentum[2], mcp.getEnergy()) 
         mcp_stau_beta = mcp_stau_tlv.Beta()
+        mcp_stau_eta = mcp_stau_tlv.Eta()
         mcp_stau_endpoint_r = sqrt(mcp.getEndpoint()[0] ** 2 + mcp.getEndpoint()[1] ** 2)
         mcp_stau_endpoint_z = mcp.getEndpoint()[2] 
+        mcp_stau_vertex_r = sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2)
+        travel_dist = sqrt(mcp.getEndpoint()[0]**2 + mcp.getEndpoint()[1]**2 + mcp.getEndpoint()[2]**2) - sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2 + mcp.getVertex()[2]**2)
 
+        # skipping staus that decay immediately, and particles that aren't staus.  leave parent line commented for now
+        # if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
+        #     continue
+        if abs(mcp.getPDG()) not in stau_ids:
+            continue  
+        
+        print("travel_dist:", travel_dist)
+        if travel_dist == 0:
+            continue
+
+        if mcp_stau_vertex_r > 553.0:
+            continue
+
+        n_truth_staus +=1
+
+        
         mcp_stau_info["id"].append(mcp.id())        
         mcp_stau_info["p_tot"].append(mcp_stau_tlv.Mag())
         mcp_stau_info["p_x"].append(mcp_stau_momentum[0])
@@ -124,9 +140,8 @@ for evt_idx, event in enumerate(event_looper(reader, args.all_events)):
         mcp_stau_info["eta"].append(mcp_stau_tlv.Eta())
         mcp_stau_info["phi"].append(mcp_stau_tlv.Phi())
         mcp_stau_info["theta"].append(mcp_stau_tlv.Theta())
-        mcp_stau_info["travel_distance"].append(sqrt(mcp.getEndpoint()[0]**2 + mcp.getEndpoint()[1]**2 + mcp.getEndpoint()[2]**2) - sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2 + mcp.getVertex()[2]**2))
-        
-        print(mcp_stau_endpoint_r)
+        mcp_stau_info["travel_distance"].append(travel_dist)
+         
         if mcp_stau_endpoint_r > 102.0 and abs(mcp_stau_tlv.Eta()) < 1.0:
             n_accepted_staus += 1
 
