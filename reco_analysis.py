@@ -107,17 +107,21 @@ for event in event_looper(reader, args.all_events):
     mcp_collection = event.getCollection("MCParticle")
     rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
     relation = pyLCIO.UTIL.LCRelationNavigator(rel_collection)
+    
     for mcp in mcp_collection:
-        # only looking at staus
-        if any(abs(parent.getPDG()) in stau_ids for parent in mcp.getParents()):
-            continue
+ 
+        mcp_stau_vertex_r = sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2)
+        travel_dist = sqrt(mcp.getEndpoint()[0]**2 + mcp.getEndpoint()[1]**2 + mcp.getEndpoint()[2]**2) - sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2 + mcp.getVertex()[2]**2)
+
         if abs(mcp.getPDG()) not in stau_ids:
             continue 
         if mcp.id() in seen_staus:
+            continue 
+        if travel_dist == 0:
             continue
-        if mcp.getGeneratorStatus == 22:
-            print("intermediate stau")
+        if mcp_stau_vertex_r > 553.0:
             continue
+
         n_truth_staus +=1 # already did this in sim-only analysis, but maybe can serve as sanity check
         reco_success = False
 
