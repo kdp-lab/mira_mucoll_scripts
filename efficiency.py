@@ -88,8 +88,8 @@ def build_analysis(redo=False):
     if CACHE.exists() and not redo:
         print(f"Loading previous info from {CACHE}, not redoing full analysis")
         with CACHE.open("rb") as f:
-            track_eff_data, all_data = pickle.load(f)
-        return track_eff_data, all_data            
+            track_eff_data, all_data, eff_by_variable = pickle.load(f)
+        return track_eff_data, all_data, eff_by_variable            
 
     print("Rebuilding analysis arrays...")
     for window in tqdm(windows):
@@ -169,7 +169,7 @@ def build_analysis(redo=False):
                     chi_sq = np.asarray(reco_data["match_track_info"]["chi_sq"])
                     ndf = np.asarray(reco_data["match_track_info"]["ndf"])
                     theta_truth = np.asarray(reco_data["match_track_info"]["theta"])
-                    pt_truth = np.asarray(reco_data["match_track_info"]["pt"])
+                    pt_truth = np.asarray(reco_data["match_track_info"]["pt"])/1000
                     phi_truth = np.asarray(reco_data['match_track_info']["phi"])
 
                     theta_den += np.histogram(theta_truth, bins=theta_bins)[0]
@@ -226,22 +226,6 @@ def build_analysis(redo=False):
                     track_eff_data[window][sample]["trackeff_bib"].append(total_efficiency)
                 else:
                     track_eff_data[window][sample]["trackeff_nobib"].append(total_efficiency)
-
-
-                ################################## hit-based efficiency ########################################
-                
-                # getting travel distance about the stau from sim (truth level), then calculating how many hits that should give it
-                # for sim_file in os.listdir(sim_path):
-                #     if get_chunk_id(sim_file) in bad_chunks:
-                #         continue
-                #     with open(os.path.join(sim_path, sim_file)) as file:
-                #         all_sim_data = json.load(file)
-                #         # for ???????
-                #         distance = all_sim_data["mcp_stau_info"]["travel_distance"]
-                        
-
-                        
-
     
     print(f"Writing cache to {CACHE}")
     CACHE.parent.mkdir(exist_ok=True)
@@ -250,6 +234,8 @@ def build_analysis(redo=False):
     return track_eff_data, all_data, eff_by_variable
 
 track_eff_data, all_data, eff_by_variable = build_analysis(redo=rebuild)
+
+print(eff_by_variable["medium"]["4000_10"]["nobib/"]["pt"])
 
 ########################################## PLOTTING ######################################
 if plotting == True:
@@ -296,16 +282,108 @@ if plotting == True:
         plt.close(fig)
 
     def eff_vs_theta(pdf):
-        fig, ax = plt.subplots()
-        for window in windows:
-            for sample in samples:
+        n_cols = len(samples)
+        n_rows = len(windows)
+
+        fig, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(3.5*n_cols, 2.8*n_rows)) 
+        colors = {"bib/":"orange", "nobib/":"blue"}
+        for r, window in enumerate(windows):
+            for c, sample in enumerate(samples):
+                ax = axes[r,c] if n_rows>1 else axes[c]
                 for option in bib_options:
-                    var_dict = eff_by_variable[window][sample][option]["theta"]
-                    plt.errorbar(var_dict["centers"], var_dict["eff"], yerr=var_dict["err"], fmt="o", label=option)
+                    arr = eff_by_variable[window][sample][option]["theta"]
+                    if not arr["centers"]:
+                        continue
+                    centers = arr["centers"][0]
+                    eff = arr["eff"][0]
+                    err = arr['err'][0]
+
+                    ax.errorbar(centers, eff, yerr=err, label="BIB" if option=="bib/" else "no BIB", color=colors[option])
+
+                    if r==0:
+                        ax.set_title(f"{sample}")
+                    if c==0:
+                        ax.set_ylabel(f"{window}")
+                    ax.grid(ls=":", alpha=0.4)
+
+        handles, labels = axes[0,0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper right")
+        fig.suptitle("tracking efficiency vs truth theta")
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+
+    def eff_vs_pt(pdf):
+        n_cols = len(samples)
+        n_rows = len(windows)
+
+        fig, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(3.5*n_cols, 2.8*n_rows)) 
+        colors = {"bib/":"orange", "nobib/":"blue"}
+        for r, window in enumerate(windows):
+            for c, sample in enumerate(samples):
+                ax = axes[r,c] if n_rows>1 else axes[c]
+                for option in bib_options:
+                    arr = eff_by_variable[window][sample][option]["pt"]
+                    if not arr["centers"]:
+                        continue
+                    centers = arr["centers"][0]
+                    eff = arr["eff"][0]
+                    err = arr['err'][0]
+
+                    ax.errorbar(centers, eff, yerr=err, label="BIB" if option=="bib/" else "no BIB", color=colors[option])
+
+                    if r==0:
+                        ax.set_title(f"{sample}")
+                    if c==0:
+                        ax.set_ylabel(f"{window}")
+                    ax.grid(ls=":", alpha=0.4)
+
+        handles, labels = axes[0,0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper right")
+        fig.suptitle("tracking efficiency vs truth pt")
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+
+    def eff_vs_phi(pdf):
+        n_cols = len(samples)
+        n_rows = len(windows)
+
+        fig, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(3.5*n_cols, 2.8*n_rows)) 
+        colors = {"bib/":"orange", "nobib/":"blue"}
+        for r, window in enumerate(windows):
+            for c, sample in enumerate(samples):
+                ax = axes[r,c] if n_rows>1 else axes[c]
+                for option in bib_options:
+                    arr = eff_by_variable[window][sample][option]["phi"]
+                    if not arr["centers"]:
+                        continue
+                    centers = arr["centers"][0]
+                    eff = arr["eff"][0]
+                    err = arr['err'][0]
+
+                    ax.errorbar(centers, eff, yerr=err, label="BIB" if option=="bib/" else "no BIB", color=colors[option])
+
+                    if r==0:
+                        ax.set_title(f"{sample}")
+                    if c==0:
+                        ax.set_ylabel(f"{window}")
+                    ax.grid(ls=":", alpha=0.4)
+
+        handles, labels = axes[0,0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper right")
+        fig.suptitle("tracking efficiency vs phi")
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
        
 
     with PdfPages(save_plot_path) as pdf:
         mass_vs_acceptance(pdf)
         mass_vs_trackeff(pdf)
         eff_vs_theta(pdf)
+        eff_vs_pt(pdf)
+        eff_vs_phi(pdf)
     print(f"Saved plot(s) to {save_plot_path}")
