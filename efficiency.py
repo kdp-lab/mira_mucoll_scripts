@@ -25,6 +25,7 @@ windows = ["tight", "medium", "loose"]
 samples = ["1000_10", "2500_10", "4000_10", "4500_10"]
 bib_options = ["bib/", "nobib/"]
 fields = ["acceptance", "trackeff_bib", "trackeff_nobib"]
+vars = ["theta", "phi", "pt"]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--plotting", action="store_true")
@@ -64,6 +65,26 @@ def build_analysis(redo=False):
         for window in windows
     }
 
+    eff_by_variable = {
+        window: {
+            sample: {
+                option: {
+                    "theta": {
+                        "eff": [],
+                        "err": [],
+                        "centers": []},
+                    "phi": {
+                        "eff": [],
+                        "err": [],
+                        "centers": []},
+                    "pt": {
+                        "eff": [],
+                        "err": [],
+                        "centers": []},
+                } for option in bib_options
+            } for sample in samples
+        } for window in windows}
+
     if CACHE.exists() and not redo:
         print(f"Loading previous info from {CACHE}, not redoing full analysis")
         with CACHE.open("rb") as f:
@@ -101,8 +122,8 @@ def build_analysis(redo=False):
                             'file': sim_file,
                             'truth_staus': chunk_sim_data["mcp_stau_info"]["id"],
                             'hit_info': chunk_sim_data["hit_info"],
-                            'accepted_staus': chunk_sim_data["n_accepted_staus"]
-                        }
+                            'accepted_staus': chunk_sim_data["n_accepted_staus"],
+                            }
                         events_data.append(event_data)
 
                 all_data[window][option][sample].append(events_data)
@@ -127,28 +148,84 @@ def build_analysis(redo=False):
                 ################################### tracking efficiency ######################################### 
                 good_reco_tracks = 0 
 
+                theta_bins = np.linspace(0 - 0.1, 2.6+0.1, 21)
+                theta_num = np.zeros(len(theta_bins)-1, int)
+                theta_den = np.zeros(len(theta_bins)-1, int)
+ 
+                phi_bins = np.linspace(-np.pi - 0.1, np.pi+0.1, 21)
+                phi_num = np.zeros(len(phi_bins)-1, int)
+                phi_den = np.zeros(len(phi_bins)-1, int)
+ 
+                pt_bins = np.linspace(-5, 5, 21)
+                pt_num = np.zeros(len(pt_bins)-1, int)
+                pt_den = np.zeros(len(pt_bins)-1, int)
+ 
                 for reco_file in os.listdir(reco_path):
                     with open(os.path.join(reco_path, reco_file)) as file: 
                         reco_data = json.load(file)
                         if get_chunk_id(reco_file) in bad_chunks: 
                             continue 
-                        chi_sq = reco_data["match_track_info"]["chi_sq"]
-                        ndf = reco_data["match_track_info"]["ndf"]
-                        
-                        for i in range(len(chi_sq)):
-                            red_chi_sq = chi_sq[i] / ndf[i]
-                            if red_chi_sq < 5:
-                                good_reco_tracks +=1 
-     
-                efficiency =  good_reco_tracks / total_accepted_staus * 100
+
+                    chi_sq = np.asarray(reco_data["match_track_info"]["chi_sq"])
+                    ndf = np.asarray(reco_data["match_track_info"]["ndf"])
+                    theta_truth = np.asarray(reco_data["match_track_info"]["theta"])
+                    pt_truth = np.asarray(reco_data["match_track_info"]["pt"])
+                    phi_truth = np.asarray(reco_data['match_track_info']["phi"])
+
+                    theta_den += np.histogram(theta_truth, bins=theta_bins)[0]
+                    phi_den += np.histogram(phi_truth, bins=phi_bins)[0]
+                    pt_den += np.histogram(pt_truth, bins=pt_bins)[0]
+                
+                    red_chi_sq = chi_sq / ndf
+                    good_mask = red_chi_sq < 5
+                    good_reco_tracks += good_mask.sum()
+
+                    theta_reco = theta_truth[good_mask]
+                    pt_reco = pt_truth[good_mask]
+                    phi_reco = phi_truth[good_mask]
+
+                    theta_num += np.histogram(theta_reco, bins=theta_bins)[0]
+                    phi_num += np.histogram(phi_reco, bins=phi_bins)[0]
+                    pt_num += np.histogram(pt_reco, bins=pt_bins)[0]
+
+                theta_eff = np.divide(theta_num, theta_den, out=np.zeros_like(theta_num, float), where=theta_den>0)
+                phi_eff = np.divide(phi_num, phi_den, out=np.zeros_like(phi_num, float), where=phi_den>0)                     
+                pt_eff = np.divide(pt_num, pt_den, out=np.zeros_like(pt_num, float), where=pt_den>0)            
+
+                theta_err = np.zeros_like(theta_eff)
+                theta_m = theta_den > 0
+                theta_err[theta_m] = np.sqrt(theta_eff[theta_m] * (1-theta_eff[theta_m])/theta_den[theta_m])
+                theta_centers = 0.5*(theta_bins[1:] + theta_bins[:-1])
+                eff_by_variable[window][sample][option]["theta"]["eff"].append(theta_eff)                
+                eff_by_variable[window][sample][option]["theta"]["err"].append(theta_err)
+                eff_by_variable[window][sample][option]["theta"]["centers"].append(theta_centers)
+
+                phi_err = np.zeros_like(phi_eff)
+                phi_m = phi_den > 0
+                phi_err[phi_m] = np.sqrt(phi_eff[phi_m] * (1-phi_eff[phi_m])/phi_den[phi_m])
+                phi_centers = 0.5*(phi_bins[1:] + phi_bins[:-1])
+                eff_by_variable[window][sample][option]["phi"]["eff"].append(phi_eff)                
+                eff_by_variable[window][sample][option]["phi"]["err"].append(phi_err)
+                eff_by_variable[window][sample][option]["phi"]["centers"].append(phi_centers)
+
+                pt_err = np.zeros_like(pt_eff)
+                pt_m = pt_den > 0
+                pt_err[pt_m] = np.sqrt(pt_eff[pt_m] * (1-pt_eff[pt_m])/pt_den[pt_m])
+                pt_centers = 0.5*(pt_bins[1:] + pt_bins[:-1])
+                eff_by_variable[window][sample][option]["pt"]["eff"].append(pt_eff)                
+                eff_by_variable[window][sample][option]["pt"]["err"].append(pt_err)
+                eff_by_variable[window][sample][option]["pt"]["centers"].append(pt_centers)
+
+
+                total_efficiency =  good_reco_tracks / total_accepted_staus * 100
                 print(f"\n ========== reco: track efficiency ==========")
-                print(f"Efficiency: {efficiency:.2f}%") 
+                print(f"Efficiency: {total_efficiency:.2f}%") 
                                 
                 track_eff_data[window][sample]["acceptance"].append(acceptance_rate)
                 if option == "bib/": 
-                    track_eff_data[window][sample]["trackeff_bib"].append(efficiency)
+                    track_eff_data[window][sample]["trackeff_bib"].append(total_efficiency)
                 else:
-                    track_eff_data[window][sample]["trackeff_nobib"].append(efficiency)
+                    track_eff_data[window][sample]["trackeff_nobib"].append(total_efficiency)
 
 
                 ################################## hit-based efficiency ########################################
@@ -169,10 +246,10 @@ def build_analysis(redo=False):
     print(f"Writing cache to {CACHE}")
     CACHE.parent.mkdir(exist_ok=True)
     with CACHE.open("wb") as f:
-        pickle.dump((track_eff_data, all_data), f, protocol=pickle.HIGHEST_PROTOCOL)
-    return track_eff_data, all_data
+        pickle.dump((track_eff_data, all_data, eff_by_variable), f, protocol=pickle.HIGHEST_PROTOCOL)
+    return track_eff_data, all_data, eff_by_variable
 
-track_eff_data, all_data = build_analysis(redo=rebuild)
+track_eff_data, all_data, eff_by_variable = build_analysis(redo=rebuild)
 
 ########################################## PLOTTING ######################################
 if plotting == True:
@@ -180,24 +257,11 @@ if plotting == True:
     marker_map = {"tight": "v", "medium":"o", "loose":"^"}
     bibcolor = "orange"
     nobibcolor = "blue"
-
-    def mass_vs_goodtracks(pdf):
-        fig, ax = plt.subplots()
-        for window in windows:
-            goodtracks_bib = []
-            goodtracks_nobib = []
-            for sample in samples:
-                goodtracks_bib.append(track_eff_data[window][sample]["goodtracks_bib"])
-                goodtracks_nobib.append(track_eff_data[window][sample]["goodtracks_nobib"]) 
-            ax.plot(mass_list, goodtracks_bib, color='orange', label=f"{window} window with BIB", marker=marker_map[window], linestyle='-', markersize=6)
-            ax.plot(mass_list, goodtracks_nobib, color='blue', label=f'{window} window without BIB', marker=marker_map[window], linestyle='--', markersize=6)
-        ax.set_xlabel("Mass [TeV]")
-        ax.set_ylabel("Percentage of tracks with Reduced $\chi^2$ < 5")
-        ax.set_title("'Good' tracks")
-        ax.legend(ncols=2)
-        fig.tight_layout()
-        pdf.savefig(fig)
-        plt.close(fig)
+    window_colors = {
+        'tight': 0.3,
+        'medium': 0.6,
+        'loose': 0.9
+    } 
 
     def mass_vs_acceptance(pdf):
         fig, ax = plt.subplots()
@@ -221,8 +285,8 @@ if plotting == True:
             for sample in samples:
                 trackeff_bib.append(track_eff_data[window][sample]["trackeff_bib"])
                 trackeff_nobib.append(track_eff_data[window][sample]["trackeff_nobib"]) 
-            ax.plot(mass_list, trackeff_bib, color='orange', label=f"{window} window with BIB", marker=marker_map[window], linestyle='-', markersize=6)
-            ax.plot(mass_list, trackeff_nobib, color='blue', label=f'{window} window without BIB', marker=marker_map[window], linestyle='--', markersize=6)
+            ax.plot(mass_list, trackeff_bib, color='orange', label=f"{window}, BIB", linestyle='-', markersize=6, alpha = window_colors[window])
+            ax.plot(mass_list, trackeff_nobib, color='blue', label=f'{window}, no BIB', linestyle=':', markersize=6, alpha = window_colors[window])
         ax.set_xlabel("Mass [TeV]")
         ax.set_ylabel("Track reconstruction efficiency")
         ax.set_title("Tracking efficiency")
@@ -231,12 +295,17 @@ if plotting == True:
         pdf.savefig(fig)
         plt.close(fig)
 
-    def mass_vs_eta(pdf):
+    def eff_vs_theta(pdf):
         fig, ax = plt.subplots()
-
+        for window in windows:
+            for sample in samples:
+                for option in bib_options:
+                    var_dict = eff_by_variable[window][sample][option]["theta"]
+                    plt.errorbar(var_dict["centers"], var_dict["eff"], yerr=var_dict["err"], fmt="o", label=option)
+       
 
     with PdfPages(save_plot_path) as pdf:
-        mass_vs_goodtracks(pdf)
         mass_vs_acceptance(pdf)
         mass_vs_trackeff(pdf)
+        eff_vs_theta(pdf)
     print(f"Saved plot(s) to {save_plot_path}")
