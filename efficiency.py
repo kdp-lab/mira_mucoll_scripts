@@ -57,8 +57,15 @@ def build_analysis(redo=False):
     track_eff_data = {
         window: {
             sample: {
-                field: []
-                for field in fields
+                "acceptance": [],
+                "trackeff_bib": {
+                    "eff": [],
+                    "err": []
+                },
+                "trackeff_nobib" : {
+                    "eff": [],
+                    "err": []
+                }
             } 
             for sample in samples
         }
@@ -84,12 +91,18 @@ def build_analysis(redo=False):
                 } for option in bib_options
             } for sample in samples
         } for window in windows}
+    
+    hit_eff_data = {
+        window: {
+            sample: {"eff": [], "err":[]} for sample in samples
+        } for window in windows
+    }
 
     if CACHE.exists() and not redo:
         print(f"Loading previous info from {CACHE}, not redoing full analysis")
         with CACHE.open("rb") as f:
-            track_eff_data, all_data, eff_by_variable = pickle.load(f)
-        return track_eff_data, all_data, eff_by_variable            
+            track_eff_data, all_data, eff_by_variable, hit_eff_data = pickle.load(f)
+        return track_eff_data, all_data, eff_by_variable, hit_eff_data            
 
     print("Rebuilding analysis arrays...")
     for window in tqdm(windows):
@@ -106,7 +119,10 @@ def build_analysis(redo=False):
                 # Get bad chunks
                     bad_chunks = set()
                     for reco_file in os.listdir(reco_path):
-                        with open(os.path.join(reco_path, reco_file)) as file:
+                        reco_fpath = os.path.join(reco_path, reco_file)
+                        if not os.path.isfile(reco_fpath):
+                            continue
+                        with open(reco_fpath) as file:
                             chunk_reco_data = json.load(file)
                             if get_chunk_id(reco_file) in chunk_reco_data.get("bad_files", []):
                                 bad_chunks.add(get_chunk_id(reco_file))
@@ -146,6 +162,9 @@ def build_analysis(redo=False):
                     print(f"Acceptance rate: {acceptance_rate:.2f}%")
 
                 ################################### tracking efficiency ######################################### 
+
+                mass = sample_to_mass[sample]
+                pt_max = np.sqrt(10**2/4 - mass**2) 
                 good_reco_tracks = 0 
 
                 theta_bins = np.linspace(0 - 0.1, 2.6+0.1, 21)
@@ -156,12 +175,15 @@ def build_analysis(redo=False):
                 phi_num = np.zeros(len(phi_bins)-1, int)
                 phi_den = np.zeros(len(phi_bins)-1, int)
  
-                pt_bins = np.linspace(-5, 5, 21)
+                pt_bins = np.linspace(0, pt_max, 21)
                 pt_num = np.zeros(len(pt_bins)-1, int)
                 pt_den = np.zeros(len(pt_bins)-1, int)
  
                 for reco_file in os.listdir(reco_path):
-                    with open(os.path.join(reco_path, reco_file)) as file: 
+                    reco_fpath =os.path.join(reco_path, reco_file)
+                    if not os.path.isfile(reco_fpath):
+                        continue
+                    with open(reco_fpath) as file: 
                         reco_data = json.load(file)
                         if get_chunk_id(reco_file) in bad_chunks: 
                             continue 
@@ -169,7 +191,7 @@ def build_analysis(redo=False):
                     chi_sq = np.asarray(reco_data["match_track_info"]["chi_sq"])
                     ndf = np.asarray(reco_data["match_track_info"]["ndf"])
                     theta_truth = np.asarray(reco_data["match_track_info"]["theta"])
-                    pt_truth = np.asarray(reco_data["match_track_info"]["pt"])/1000
+                    pt_truth = np.asarray(reco_data["match_stau_info"]["pt"])/1000 
                     phi_truth = np.asarray(reco_data['match_track_info']["phi"])
 
                     theta_den += np.histogram(theta_truth, bins=theta_bins)[0]
@@ -218,25 +240,95 @@ def build_analysis(redo=False):
 
 
                 total_efficiency =  good_reco_tracks / total_accepted_staus * 100
+                total_efficiency_error = np.sqrt((total_efficiency/100) * (1-(total_efficiency/100))/total_accepted_staus)
                 print(f"\n ========== reco: track efficiency ==========")
                 print(f"Efficiency: {total_efficiency:.2f}%") 
                                 
                 track_eff_data[window][sample]["acceptance"].append(acceptance_rate)
                 if option == "bib/": 
-                    track_eff_data[window][sample]["trackeff_bib"].append(total_efficiency)
+                    track_eff_data[window][sample]["trackeff_bib"]["eff"].append(total_efficiency)
+                    track_eff_data[window][sample]["trackeff_bib"]["err"].append(total_efficiency_error)
                 else:
-                    track_eff_data[window][sample]["trackeff_nobib"].append(total_efficiency)
-    
+                    track_eff_data[window][sample]["trackeff_nobib"]["eff"].append(total_efficiency)
+                    track_eff_data[window][sample]["trackeff_nobib"]["err"].append(total_efficiency_error)
+
+
+                #################################### hit efficiency ####################################
+                    
+                if option == "bib/":
+                    continue
+                            
+                layer_map = [
+                    ("VB", 0, 30), ("VB", 1, 30), ("VB", 2, 51), ("VB", 3, 51), ("VB", 4, 74), ("VB", 5, 74), ("VB", 6, 102), ("VB", 7, 102),
+                    ("IB", 0, 127), ("IB", 1, 340), ("IB", 2, 554), 
+                    ("OB", 0, 819), ("OB", 1, 1153), ("OB", 2, 1486)
+                ] 
+ 
+                layer_radii = np.array([r for _,_,r in layer_map])
+                n_layers_tot = len(layer_map)
+
+                def exp_hits_mask(dist_mm: float)->np.ndarray:
+                    return layer_radii <= dist_mm
+
+                hit_eff = {p: {"exp": np.zeros(n_layers_tot, dtype=int),
+                            "obs": np.zeros(n_layers_tot, dtype=int)} for p in ("stau", "antistau")}
+                
+                hit_level_path = os.path.join(reco_path, "hit_level") 
+                for hit_reco_file in os.listdir(hit_level_path):
+                    hit_fpath = os.path.join(hit_level_path, hit_reco_file)
+                    with open(hit_fpath) as hit_file:
+                        reco = json.load(hit_file)
+
+                    travel_dist = np.asarray(reco["match_stau_info"]["travel_dist"])
+                    pdg = np.asarray(reco["match_stau_info"]["id"])
+                    idx_stau, = np.where(pdg > 0)
+                    idx_antistau, = np.where(pdg < 0)
+                    truth_idx = {"stau": idx_stau, "antistau": idx_antistau}
+                    
+                    for species, idx in truth_idx.items():
+                        if idx.size == 0:
+                            continue
+
+                        for i in idx:
+                            dist = float(travel_dist[i])
+                            exp_hits = exp_hits_mask(dist).astype(int)
+                            hit_eff[species]["exp"] += exp_hits
+
+                        for det in ("VB", "IB", "OB"):
+                            lay = np.asarray(reco["hits_from_mcp"][det]["layer"])
+                            pdg_hit = np.asarray(reco["hits_from_mcp"][det]["pdg_id"])
+
+                            for layer in np.unique(lay[pdg_hit > 0]) if species == "stau" else np.unique(lay[pdg_hit < 0]):
+                                if det=="VB":
+                                    global_idx = layer
+                                elif det=="IB":
+                                    global_idx = 8 + layer
+                                elif det=="OB":
+                                    global_idx = 11 + layer
+                                hit_eff[species]["obs"][global_idx] += 1
+
+                # eff_stau = hit_eff["stau"]["obs"] / hit_eff["stau"]["exp"]
+                # eff_antistau = hit_eff["antistau"]["obs"] / hit_eff["antistau"]["exp"]
+                
+                eff_total = (hit_eff["stau"]["obs"] + hit_eff["antistau"]["obs"]) / (hit_eff["stau"]["exp"] + hit_eff["antistau"]["exp"])
+                hit_eff_data[window][sample]["eff"] = eff_total
+                error = np.sqrt(eff_total * (1-eff_total)/(hit_eff["stau"]["exp"] + hit_eff["antistau"]["exp"]))
+                hit_eff_data[window][sample]["err"] = error
+
+                                
+
+                print("\n ============ Hit level efficiency per layer: ===========")
+                print(hit_eff_data[window][sample])
+                  
     print(f"Writing cache to {CACHE}")
     CACHE.parent.mkdir(exist_ok=True)
     with CACHE.open("wb") as f:
-        pickle.dump((track_eff_data, all_data, eff_by_variable), f, protocol=pickle.HIGHEST_PROTOCOL)
-    return track_eff_data, all_data, eff_by_variable
+        pickle.dump((track_eff_data, all_data, eff_by_variable, hit_eff_data), f, protocol=pickle.HIGHEST_PROTOCOL)
+    return track_eff_data, all_data, eff_by_variable, hit_eff_data
 
-track_eff_data, all_data, eff_by_variable = build_analysis(redo=rebuild)
+track_eff_data, all_data, eff_by_variable, hit_eff_data = build_analysis(redo=rebuild)
 
-print(eff_by_variable["medium"]["4000_10"]["nobib/"]["pt"])
-
+print(track_eff_data["loose"]["4000_10"]["trackeff_bib"]["err"])
 ########################################## PLOTTING ######################################
 if plotting == True:
     print("Now making plots...")
@@ -268,15 +360,22 @@ if plotting == True:
         for window in windows:
             trackeff_bib = []
             trackeff_nobib = []
+            err_bib = []
+            err_nobib = []
             for sample in samples:
-                trackeff_bib.append(track_eff_data[window][sample]["trackeff_bib"])
-                trackeff_nobib.append(track_eff_data[window][sample]["trackeff_nobib"]) 
-            ax.plot(mass_list, trackeff_bib, color='orange', label=f"{window}, BIB", linestyle='-', markersize=6, alpha = window_colors[window])
-            ax.plot(mass_list, trackeff_nobib, color='blue', label=f'{window}, no BIB', linestyle=':', markersize=6, alpha = window_colors[window])
+                trackeff_bib.append(track_eff_data[window][sample]["trackeff_bib"]["eff"][0])
+                trackeff_nobib.append(track_eff_data[window][sample]["trackeff_nobib"]["eff"][0])
+                err_bib.append(track_eff_data[window][sample]["trackeff_bib"]["err"][0]*100)
+                err_nobib.append(track_eff_data[window][sample]["trackeff_nobib"]["err"][0]*100) 
+            marker = marker_map[window]
+            
+            ax.errorbar(mass_list, trackeff_bib, yerr=(err_bib), fmt=f"{marker}-", ms=6, color='orange', alpha=window_colors[window], label=f"{window} BIB")
+            ax.errorbar(mass_list, trackeff_nobib, yerr=(err_nobib), fmt=f"{marker}:", ms=6, color="blue", alpha=window_colors[window], label=f"{window} no BIB")
+
         ax.set_xlabel("Mass [TeV]")
-        ax.set_ylabel("Track reconstruction efficiency")
-        ax.set_title("Tracking efficiency")
-        ax.legend(ncols=2)    
+        ax.set_ylabel("Track reconstruction efficiency (%)")
+        ax.set_title("Total tracking efficiency vs mass")
+        ax.legend()    
         fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
@@ -378,12 +477,44 @@ if plotting == True:
         fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
-       
+
+
+    def eff_by_layer(pdf): 
+        layer_names = ["VB0","VB1","VB2","VB3","VB4","VB5","VB6","VB7","IB0","IB1","IB2","OB0","OB1","OB2"]
+        x = np.arange(len(layer_names))
+        width = 0.25
+        offset = {"tight": -width, "medium": 0.0, "loose": +width}
+        colors = {"tight":"tab:purple", "medium": "tab:cyan", "loose":"tab:olive"}
+        for sample in samples:
+            fig, ax = plt.subplots(figsize=(9,3))
+            for window in windows:
+                eff = hit_eff_data[window][sample]["eff"]
+                err = hit_eff_data[window][sample]["err"]
+                if eff is None or len(eff)==0:
+                    continue
+                eff = np.asarray(eff, dtype=float)
+                err = np.asarray(err, dtype=float)
+                err_clean = np.where(np.isfinite(err), err, 0.0)
+                
+                ax.bar(x + offset[window], eff, width=width, yerr=err_clean, label=window, color=colors[window])
+
+            ax.set_xticks(x, layer_names, ha="right", fontsize=8)
+            ax.set_ylim(0,1.05)
+            ax.set_ylabel("Hit reconstruction efficiency")
+            ax.set_title(f"Hit-level efficiency per layer for {sample}")
+            for xc in (7.5, 10.5):
+                ax.axvline(x=xc, color='k', ls='--', alpha=0.5)
+            ax.legend(title="window", loc="upper right")
+            fig.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
 
     with PdfPages(save_plot_path) as pdf:
-        mass_vs_acceptance(pdf)
+        # mass_vs_acceptance(pdf)
         mass_vs_trackeff(pdf)
-        eff_vs_theta(pdf)
-        eff_vs_pt(pdf)
-        eff_vs_phi(pdf)
+        # eff_vs_theta(pdf)
+        # eff_vs_pt(pdf)
+        # eff_vs_phi(pdf)
+        # eff_by_layer(pdf)
+        
     print(f"Saved plot(s) to {save_plot_path}")
