@@ -328,7 +328,6 @@ def build_analysis(redo=False):
 
 track_eff_data, all_data, eff_by_variable, hit_eff_data = build_analysis(redo=rebuild)
 
-print(track_eff_data["loose"]["4000_10"]["trackeff_bib"]["err"])
 ########################################## PLOTTING ######################################
 if plotting == True:
     print("Now making plots...")
@@ -417,7 +416,7 @@ if plotting == True:
         n_cols = len(samples)
         n_rows = len(windows)
 
-        fig, axes = plt.subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(3.5*n_cols, 2.8*n_rows)) 
+        fig, axes = plt.subplots(n_rows, n_cols, harey=True, figsize=(3.5*n_cols, 2.8*n_rows)) 
         colors = {"bib/":"orange", "nobib/":"blue"}
         for r, window in enumerate(windows):
             for c, sample in enumerate(samples):
@@ -511,9 +510,9 @@ if plotting == True:
 
     with PdfPages(save_plot_path) as pdf:
         # mass_vs_acceptance(pdf)
-        mass_vs_trackeff(pdf)
+        # mass_vs_trackeff(pdf)
         # eff_vs_theta(pdf)
-        # eff_vs_pt(pdf)
+        eff_vs_pt(pdf)
         # eff_vs_phi(pdf)
         # eff_by_layer(pdf)
         
