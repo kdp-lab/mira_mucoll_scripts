@@ -64,7 +64,8 @@ match_stau_info = {
     "eta": [],
     "phi": [], 
     "theta": [],
-    "id": []
+    "id": [],
+    "travel_dist": []
 }
 
 systems = ["VB", "VE", "IB", "IE", "OB", "OE"]
@@ -88,6 +89,22 @@ match_track_info = {
     "n_hits_outer": [],
 }
 
+hits_from_mcp = {
+    system: {
+        "x": [],
+        "y": [],
+        "z": [],
+        "time": [],
+        "pdg_id": [],
+        "layer": [],
+        "mcp_id": [],
+        "part_of_track": [],
+        "vertex_x": [],
+        "vertex_y": [],
+        "vertex_z": []
+    } for system in systems
+}
+
 reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
 reader.open(in_file)
 
@@ -107,6 +124,90 @@ for event in event_looper(reader, args.all_events):
     mcp_collection = event.getCollection("MCParticle")
     rel_collection = event.getCollection("MCParticle_SiTracks_Refitted")
     relation = pyLCIO.UTIL.LCRelationNavigator(rel_collection)
+
+
+    trk_coll = event.getCollection("SiTracks_Refitted")
+
+    reco_hit_colls = {
+        "VXDBarrel" : event.getCollection("VXDBarrelHits"),
+        "VXDEndcap" : event.getCollection("VXDEndcapHits"),
+        "ITBarrel"  : event.getCollection("ITBarrelHits"),
+        "ITEndcap"  : event.getCollection("ITEndcapHits"),
+        "OTBarrel"  : event.getCollection("OTBarrelHits"),
+        "OTEndcap"  : event.getCollection("OTEndcapHits"),
+    }
+
+    sim_hit_colls  = {
+        "VXDBarrel" : event.getCollection("VertexBarrelCollection"),
+        "VXDEndcap" : event.getCollection("VertexEndcapCollection"),
+        "ITBarrel"  : event.getCollection("InnerTrackerBarrelCollection"),
+        "ITEndcap"  : event.getCollection("InnerTrackerEndcapCollection"),
+        "OTBarrel"  : event.getCollection("OuterTrackerBarrelCollection"),
+        "OTEndcap"  : event.getCollection("OuterTrackerEndcapCollection"),
+    }
+ 
+    rel_nav = {
+        "VXDBarrel" : pyLCIO.UTIL.LCRelationNavigator(
+                        event.getCollection("VXDBarrelHitsRelations")),
+        "VXDEndcap" : pyLCIO.UTIL.LCRelationNavigator(
+                        event.getCollection("VXDEndcapHitsRelations")),
+        "ITBarrel"  : pyLCIO.UTIL.LCRelationNavigator(
+                        event.getCollection("ITBarrelHitsRelations")),
+        "ITEndcap"  : pyLCIO.UTIL.LCRelationNavigator(
+                        event.getCollection("ITEndcapHitsRelations")),
+        "OTBarrel"  : pyLCIO.UTIL.LCRelationNavigator(
+                        event.getCollection("OTBarrelHitsRelations")),
+        "OTEndcap"  : pyLCIO.UTIL.LCRelationNavigator(
+                        event.getCollection("OTEndcapHitsRelations")),
+    }
+
+    hits_in_tracks = set()
+    for track in trk_coll:
+        for hit in track.getTrackerHits():
+            hits_in_tracks.add(hit)
+
+    system_map = {1: "VB", 2: "VE", 3: "IB", 4: "IE", 5: "OB", 6: "OE"}
+
+    for det_name, simhits in sim_hit_colls.items():
+        encoding = simhits.getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
+        decoder = pyLCIO.UTIL.BitField64(encoding)
+        rel = rel_nav[det_name]
+
+        for simhit in simhits:
+            mcp = simhit.getMCParticle()
+            if not mcp:
+                continue
+            pdgid = mcp.getPDG()
+
+            if abs(pdgid) not in stau_ids:
+                continue
+
+            decoder.setValue(int(simhit.getCellID0()))
+            system = system_map[decoder["system"].value()] 
+            if system in ("VE", "IE", "OE"):
+                continue
+            layer = decoder["layer"].value()
+            side = decoder["side"].value()
+            vertex_x = mcp.getVertex()[0]
+            vertex_y = mcp.getVertex()[1]
+            vertex_z = mcp.getVertex()[2]
+
+            reco_hits = rel.getRelatedFromObjects(simhit)
+            for reco_hit in reco_hits:
+                in_track = (reco_hit in hits_in_tracks)
+
+                hits_from_mcp[system]["x"].append(reco_hit.getPosition()[0])
+                hits_from_mcp[system]["y"].append(reco_hit.getPosition()[1])
+                hits_from_mcp[system]["z"].append(reco_hit.getPosition()[2])
+
+                hits_from_mcp[system]["time"].append(reco_hit.getTime())
+                hits_from_mcp[system]["pdg_id"].append(pdgid)
+                hits_from_mcp[system]["layer"].append(layer)
+                hits_from_mcp[system]["part_of_track"].append(in_track)
+                hits_from_mcp[system]["vertex_x"].append(vertex_x)
+                hits_from_mcp[system]["vertex_y"].append(vertex_y)
+                hits_from_mcp[system]["vertex_z"].append(vertex_z)
+
     
     for mcp in mcp_collection:
  
@@ -138,8 +239,14 @@ for event in event_looper(reader, args.all_events):
         mcp_eta = mcp_stau_tlv.Eta()
         mcp_phi = mcp_stau_tlv.Phi()
         mcp_theta = mcp_stau_tlv.Theta()
+        mcp_stau_endpoint_r = sqrt(mcp.getEndpoint()[0] ** 2 + mcp.getEndpoint()[1] ** 2)
         
         print(len(stau_tracks))
+        if mcp_stau_endpoint_r < 102.0 and abs(mcp_stau_tlv.Eta()) > 1.0:
+            continue
+        if len(stau_tracks)>1:
+            print("HEY more than one track per stau here")
+            continue
         for track in stau_tracks:
             track_hits = {s:{f:[] for f in hit_fields} for s in systems}
             seen_layers = set() # making an empty set that we can add the layers to as we go through them so that we aren't double counting hits
@@ -200,11 +307,12 @@ for event in event_looper(reader, args.all_events):
             # going to ignore tracks that don't have 3.5+ hits since they aren't reliable for reco              
             n_total_hits = (n_pix_hits)/2.0 + n_inner_hits + n_outer_hits 
             # NOTE: dividing pix hits by two because current geometry uses doublet layers, this will not be true soon
+            seen_staus.add(mcp.id())
             if n_total_hits < 3.5:
                 print("Not enough hits to reconstruct stau.")
                 continue  
             reco_success = True
-            seen_staus.add(mcp.id())
+            
             # so, only doing the following if there are 3.5 hits or more, meaning the track and mcp can be matched. now looking more at reco info for that 
             
             for s in systems:
@@ -244,7 +352,8 @@ for event in event_looper(reader, args.all_events):
             match_stau_info["eta"].append(mcp_eta)
             match_stau_info["phi"].append(mcp_phi)
             match_stau_info["theta"].append(mcp_theta)
-            match_stau_info["id"].append(mcp.id())
+            match_stau_info["id"].append(mcp.getPDG())
+            match_stau_info["travel_dist"].append(travel_dist)
 
 reader.close()
 
@@ -259,6 +368,6 @@ if n_truth_staus == 0:
     bad_files.append(chunk)
 
 
-all_data = {"match_stau_info": match_stau_info, "match_track_info": match_track_info, "bad_files": bad_files}
+all_data = {"match_stau_info": match_stau_info, "match_track_info": match_track_info, "bad_files": bad_files, "hits_from_mcp": hits_from_mcp}
 with open(out_file, "w") as f:
     json.dump(all_data, f, indent=2, sort_keys=True)

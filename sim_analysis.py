@@ -126,7 +126,6 @@ for evt_idx, event in enumerate(event_looper(reader, args.all_events)):
             continue
 
         n_truth_staus +=1
-
         
         mcp_stau_info["id"].append(mcp.id())        
         mcp_stau_info["p_tot"].append(mcp_stau_tlv.Mag())
