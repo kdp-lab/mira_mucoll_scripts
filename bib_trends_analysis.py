@@ -14,10 +14,13 @@ import matplotlib as mpl
 # Currently doing this for just 4TeV, 10ns staus in the medium time window but with increasing amounts of BIB
 # to see how efficiency scales
 
-bib_options = np.arange(10, 55, 5)
+
+# bib_options = np.arange(10, 55, 5)
+bib_options = [50]
 sim_dir = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency/sim/4000_10/"
 reco_bigdir = "/scratch/miralittmann/analysis/mira_analysis_code/bib_trends/4000_10/medium/"
 plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/bib_trends.pdf"
+print(len(os.listdir(sim_dir)))
 
 def get_chunk_id(fname: str) -> int:
     base = os.path.basename(fname)
@@ -53,6 +56,7 @@ for option in bib_options:
     eta_bins = np.linspace(-1.01, 1.01, 21)
     eta_den = np.zeros(len(eta_bins)-1, int)
     eta_num = np.zeros(len(eta_bins)-1, int) 
+    accepted_staus = 0
  
     for reco_file in os.listdir(reco_dir):
         reco_path = os.path.join(reco_dir, reco_file)
@@ -71,12 +75,14 @@ for option in bib_options:
         bad_mask = red_chi_sq > 5
         bad_reco_tracks += bad_mask.sum()
         good_reco_tracks += good_mask.sum() 
+        accepted_staus += reco_data["accepted_staus"] 
 
         theta_truth = np.asarray(reco_data["match_track_info"]["theta"])
         eta_truth = np.asarray(-np.log(np.tan(0.5*theta_truth)))
         eta_den += np.histogram(eta_truth, bins=eta_bins)[0]
         eta_reco = eta_truth[good_mask]
         eta_num += np.histogram(eta_reco, bins=eta_bins)[0]
+    
     eta_eff = np.divide(eta_num, eta_den, out=np.zeros_like(eta_num, float), where=eta_den>0)
     eta_err = np.zeros_like(eta_eff)
     eta_m = eta_den > 0
@@ -86,6 +92,7 @@ for option in bib_options:
     all_eff_data[option]["eta_err"]=eta_err*100
     all_eff_data[option]["eta_eff"]=eta_eff*100
     all_eff_data[option]["eta_centers"]=eta_centers
+    
 
     print(f"found {good_reco_tracks} tracks with reduced chi^2 < 5")
     print(f"and {bad_reco_tracks} with reduced chi^2 > 5 :(")
@@ -93,27 +100,10 @@ for option in bib_options:
     all_eff_data[option]["percent_good_tracks"]=(percent_good_track)
     total_tracks = good_reco_tracks + bad_reco_tracks
     print('total tracks', total_tracks)
+    print('total accepted', accepted_staus)
      
- 
-    for sim_file in os.listdir(sim_dir):
-        chunk_id = get_chunk_id(sim_file)
-        if chunk_id in bad_chunks:
-            continue
-        with open(os.path.join(sim_dir, sim_file)) as file:
-            sim_data = json.load(file)
-            total_files_processed += 1
-            truth_staus = sim_data["mcp_stau_info"]["id"]
-            hit_info = sim_data["hit_info"]
-            acc_staus = sim_data["n_accepted_staus"]
-            chunk_data = {"truth_staus":truth_staus, "hit_info": hit_info, "acc_staus": acc_staus}
-            sim_all_data.append(chunk_data)
-
-    total_accepted_staus = 0
-    for i in range(len(sim_all_data)):
-        accepted_stau_per_event = sim_all_data[i]["acc_staus"]
-        total_accepted_staus += accepted_stau_per_event
-    all_eff_data[option]["accepted"].append(total_accepted_staus)
-    print("all accepted", total_accepted_staus)
+    total_accepted_staus = accepted_staus
+    all_eff_data[option]["accepted"] = total_accepted_staus
     tot_eff = good_reco_tracks / total_accepted_staus * 100
     all_eff_data[option]["total_eff"]=(tot_eff)
     all_eff_data[option]["loss_reco"]=((total_accepted_staus - (good_reco_tracks + bad_reco_tracks))/total_accepted_staus)*100

@@ -208,7 +208,7 @@ for event in event_looper(reader, args.all_events):
                 hits_from_mcp[system]["vertex_y"].append(vertex_y)
                 hits_from_mcp[system]["vertex_z"].append(vertex_z)
 
-    
+    accepted_staus = 0
     for mcp in mcp_collection:
  
         mcp_stau_vertex_r = sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2)
@@ -247,6 +247,8 @@ for event in event_looper(reader, args.all_events):
         if len(stau_tracks)>1:
             print("HEY more than one track per stau here")
             continue
+
+        accepted_staus += 1
         for track in stau_tracks:
             track_hits = {s:{f:[] for f in hit_fields} for s in systems}
             seen_layers = set() # making an empty set that we can add the layers to as we go through them so that we aren't double counting hits
@@ -368,6 +370,6 @@ if n_truth_staus == 0:
     bad_files.append(chunk)
 
 
-all_data = {"match_stau_info": match_stau_info, "match_track_info": match_track_info, "bad_files": bad_files, "hits_from_mcp": hits_from_mcp}
+all_data = {"match_stau_info": match_stau_info, "match_track_info": match_track_info, "bad_files": bad_files, "hits_from_mcp": hits_from_mcp, "accepted_staus": accepted_staus}
 with open(out_file, "w") as f:
     json.dump(all_data, f, indent=2, sort_keys=True)
