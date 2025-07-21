@@ -15,8 +15,7 @@ import matplotlib as mpl
 # to see how efficiency scales
 
 
-# bib_options = np.arange(10, 55, 5)
-bib_options = [50]
+bib_options = np.arange(15, 55, 5)
 sim_dir = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency/sim/4000_10/"
 reco_bigdir = "/scratch/miralittmann/analysis/mira_analysis_code/bib_trends/4000_10/medium/"
 plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/bib_trends.pdf"

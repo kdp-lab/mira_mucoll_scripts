@@ -16,13 +16,16 @@ CACHE = pathlib.Path("cache/efficiency.pkl")
 sample_to_mass = {
     "1000_10": 1.0,
     "2500_10": 2.5,
+    "3000_10": 3.0,
+    "3500_10": 3.5,
     "4000_10": 4.0,
     "4500_10": 4.5
 }
 
-mass_list = [1.0, 2.5, 4.0, 4.5]
+mass_list = [1.0, 2.5, 3.0, 3.5, 4.0, 4.5]
 windows = ["tight", "medium", "loose"]
-samples = ["1000_10", "2500_10", "4000_10", "4500_10"]
+samples = ["1000_10", "2500_10", "3000_10", "3500_10", "4000_10", "4500_10"]
+
 bib_options = ["bib/", "nobib/"]
 fields = ["acceptance", "trackeff_bib", "trackeff_nobib"]
 vars = ["theta", "phi", "pt"]
@@ -114,19 +117,20 @@ def build_analysis(redo=False):
                 events_data = []
 
                 ##################################### setup + acceptance (from sim info) #############################
+                bad_chunks = set()
+                for reco_file in os.listdir(reco_path):
+                    reco_fpath = os.path.join(reco_path, reco_file)
+                    if not os.path.isfile(reco_fpath):
+                        continue
+                    with open(reco_fpath) as file:
+                        chunk_reco_data = json.load(file)
+                        if get_chunk_id(reco_file) in chunk_reco_data.get("bad_files", []):
+                            bad_chunks.add(get_chunk_id(reco_file))
+                
+
                 for sim_file in os.listdir(sim_path):
 
                 # Get bad chunks
-                    bad_chunks = set()
-                    for reco_file in os.listdir(reco_path):
-                        reco_fpath = os.path.join(reco_path, reco_file)
-                        if not os.path.isfile(reco_fpath):
-                            continue
-                        with open(reco_fpath) as file:
-                            chunk_reco_data = json.load(file)
-                            if get_chunk_id(reco_file) in chunk_reco_data.get("bad_files", []):
-                                bad_chunks.add(get_chunk_id(reco_file))
-                    
                     chunk_id = get_chunk_id(sim_file)
                     if chunk_id in bad_chunks:
                         continue
@@ -273,7 +277,10 @@ def build_analysis(redo=False):
                 hit_eff = {p: {"exp": np.zeros(n_layers_tot, dtype=int),
                             "obs": np.zeros(n_layers_tot, dtype=int)} for p in ("stau", "antistau")}
                 
-                hit_level_path = os.path.join(reco_path, "hit_level") 
+                if sample in ("3000_10", "3500_10"):
+                    hit_level_path = reco_path
+                else: 
+                    hit_level_path = os.path.join(reco_path, "hit_level") 
                 for hit_reco_file in os.listdir(hit_level_path):
                     hit_fpath = os.path.join(hit_level_path, hit_reco_file)
                     with open(hit_fpath) as hit_file:
@@ -510,9 +517,9 @@ if plotting == True:
 
     with PdfPages(save_plot_path) as pdf:
         # mass_vs_acceptance(pdf)
-        # mass_vs_trackeff(pdf)
+        mass_vs_trackeff(pdf)
         # eff_vs_theta(pdf)
-        eff_vs_pt(pdf)
+        # eff_vs_pt(pdf)
         # eff_vs_phi(pdf)
         # eff_by_layer(pdf)
         
