@@ -111,6 +111,7 @@ reader.open(in_file)
 seen_staus = set()
 n_truth_staus = 0
 n_reco_staus = 0
+accepted_staus = 0
 # Looping through events but only if we need to (I've been running with one event per chunk, if this isn't the case add --all-events to the sh script line 7)
 for event in event_looper(reader, args.all_events): 
     decoders = {}
@@ -179,8 +180,8 @@ for event in event_looper(reader, args.all_events):
                 continue
             pdgid = mcp.getPDG()
 
-            if abs(pdgid) not in stau_ids:
-                continue
+            # if abs(pdgid) not in stau_ids:
+            #     continue
 
             decoder.setValue(int(simhit.getCellID0()))
             system = system_map[decoder["system"].value()] 
@@ -208,7 +209,6 @@ for event in event_looper(reader, args.all_events):
                 hits_from_mcp[system]["vertex_y"].append(vertex_y)
                 hits_from_mcp[system]["vertex_z"].append(vertex_z)
 
-    accepted_staus = 0
     for mcp in mcp_collection:
  
         mcp_stau_vertex_r = sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2)
@@ -242,7 +242,7 @@ for event in event_looper(reader, args.all_events):
         mcp_stau_endpoint_r = sqrt(mcp.getEndpoint()[0] ** 2 + mcp.getEndpoint()[1] ** 2)
         
         print(len(stau_tracks))
-        if mcp_stau_endpoint_r < 102.0 and abs(mcp_stau_tlv.Eta()) > 1.0:
+        if mcp_stau_endpoint_r < 102.0 or abs(mcp_stau_tlv.Eta()) > 1.0:
             continue
         if len(stau_tracks)>1:
             print("HEY more than one track per stau here")
