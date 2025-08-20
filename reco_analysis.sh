@@ -37,9 +37,7 @@ while [[ $# -gt 0 ]]; do
             proc_id="$2"
             shift 2
             ;;
-        *)
-            usage
-            ;;
+        *) echo "unknown option: $key"; exit 1 ;; 
     esac
 done
 
@@ -53,5 +51,5 @@ echo "Executing command: $command"
 eval $command
 
 echo "<<<Delete input files so they don't get transfered twice on exit"
-rm -rf reco_condor_analyzer.py
+rm -rf reco_analysis.py
 echo ">>> Deletions complete. Test job complete"
