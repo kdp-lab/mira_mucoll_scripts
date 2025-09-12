@@ -10,11 +10,11 @@ import ROOT
 from tqdm import tqdm
 
 samples = ["1000_10", "2500_10", "3000_10", "3500_10", "4000_10", "4500_10"]
-windows = ["loose", "medium", "tight", "mira_time"]
+windows = ["loose", "medium", "tight"]
 
 reg_window_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/nobib/"
-mira_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mira_time/v2/nobib/"
-pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/hit-based-eff.pdf"
+# mira_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mira_time/v2/nobib/"
+pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/hit-based-eff_track_agnostic.pdf"
 
 n_files = 50
 stau_ids = {1000015, -1000015, 2000015, -2000015}
@@ -75,10 +75,10 @@ for i in tqdm(range(n_files)):
                      "obs": np.zeros(L, dtype=np.int64),
                 }
             
-            if window == "mira_time":
-                fname = os.path.join(mira_path, sample, f"{sample}_reco{i}.slcio")
-            else:
-                fname = os.path.join(reg_window_path,window,sample,f"{sample}_reco{i}.slcio")
+            # if window == "mira_time":
+            #     fname = os.path.join(mira_path, sample, f"{sample}_reco{i}.slcio")
+            # else:
+            fname = os.path.join(reg_window_path,window,sample,f"{sample}_reco{i}.slcio")
             if not os.path.exists(fname):
                 continue
 
@@ -87,51 +87,83 @@ for i in tqdm(range(n_files)):
             for event in reader:
                 rel_nav = build_rel_nav(event)
 
-                rel_collection   = event.getCollection("MCParticle_SiTracks")
-                track_collection = event.getCollection("SiTracks")
-                sim_particle_collection = event.getCollection("MCParticle")
+                # rel_collection   = event.getCollection("MCParticle_SiTracks")
+                # track_collection = event.getCollection("SiTracks")
+                # sim_particle_collection = event.getCollection("MCParticle")
 
-                # SIM: expected hits
-                mcp_reach = {}
-                for mcp in sim_particle_collection:
-                    if abs(mcp.getPDG()) not in stau_ids:
-                        continue
-                    r_end = np.hypot(mcp.getEndpoint()[0], mcp.getEndpoint()[1])
-                    if r_end >= 127:
-                        m = exp_hits_mask(r_end)
-                        mcp_reach[mcp.id()] = m
-                        eff_stats[key_sw]["exp"] += m.astype(np.int64)
+                # # SIM: expected hits
+                # mcp_reach = {}
+                # for mcp in sim_particle_collection:
+                #     if abs(mcp.getPDG()) not in stau_ids:
+                #         continue
+                #     r_end = np.hypot(mcp.getEndpoint()[0], mcp.getEndpoint()[1])
+                #     if r_end >= 127:
+                #         m = exp_hits_mask(r_end)
+                #         mcp_reach[mcp.id()] = m
+                #         eff_stats[key_sw]["exp"] += m.astype(np.int64)
 
                 # RECO: observed hits
-                seen = set()
-                for idx in range(rel_collection.getNumberOfElements()):
-                    rel = rel_collection.getElementAt(idx)
-                    mcp_from_relation = rel.getFrom()
-                    track = rel.getTo()
+                # seen = set()
+                # for idx in range(rel_collection.getNumberOfElements()):
+                #     rel = rel_collection.getElementAt(idx)
+                #     mcp_from_relation = rel.getFrom()
+                #     track = rel.getTo()
                                     
-                    if not mcp_from_relation or abs(mcp_from_relation.getPDG()) not in stau_ids:
-                        continue
-                    if mcp_from_relation.id() in seen:
-                        continue
-                    seen.add(mcp_from_relation.id())
+                #     if not mcp_from_relation or abs(mcp_from_relation.getPDG()) not in stau_ids:
+                #         continue
+                #     if mcp_from_relation.id() in seen:
+                #         continue
+                #     seen.add(mcp_from_relation.id())
                     
-                    exp_mask = mcp_reach.get(mcp_from_relation.id())
-                    if exp_mask is None:
-                        continue
+                #     exp_mask = mcp_reach.get(mcp_from_relation.id())
+                #     if exp_mask is None:
+                #         continue
                                                             
-                    enc = rel_nav["_ENCODING"]
-                    obs_hits = np.zeros(len(layer_map),dtype=bool)
-                    for hit in track.getTrackerHits():
-                        system, layer = decode_system_layer(hit, enc) 
+                enc = rel_nav["_ENCODING"]
+
+                sim_specs = [
+                    ("VXDBarrel", "VXDBarrelCollection", "VXDBarrel"),
+                    ("ITBarrel",  "ITBarrelCollection",  "ITBarrel"),
+                    ("OTBarrel",  "OTBarrelCollection",  "OTBarrel"),
+                ]
+
+                for det_key, sim_coll_name, nav_key in sim_specs:
+                    if sim_coll_name not in event.getCollectionNames():
+                        continue
+                    sim_coll = event.getCollection(sim_coll_name)
+                    nav = rel_nav[nav_key]
+
+                    for simhit in sim_coll:
+                        system, layer = decode_system_layer(simhit, enc)
                         det_name = system_to_det.get(system)
                         if det_name in ("VE", "IE", "OE"):
                             continue
-                        key = (det_name[:2], layer) 
-                        obs_hits[layer_index[key]] = True 
 
-                    eff_stats[key_sw]["obs"] += (obs_hits & exp_mask).astype(np.int64) 
+                        idx = layer_index.get((det_name[:2], layer))
+                        if idx is None:
+                            continue
+                        
+                        eff_stats[key_sw]["exp"][idx] += 1
+
+                        related_reco_hits = nav.getRelatedFromObjects(simhit) or []
+                        if related_reco_hits:
+                            eff_stats[key_sw]["obs"][idx] += 1
+                    
+
+                    # obs_hits = np.zeros(len(layer_map),dtype=bool)
+                    # for hit in track.getTrackerHits():
+                    #     system, layer = decode_system_layer(hit, enc) 
+                    #     det_name = system_to_det.get(system)
+                    #     if det_name in ("VE", "IE", "OE"):
+                    #         continue
+                    #     key = (det_name[:2], layer) 
+                    #     obs_hits[layer_index[key]] = True 
+
+                    # eff_stats[key_sw]["obs"] += (obs_hits & exp_mask).astype(np.int64) 
                     
             reader.close()
+
+print(eff_stats)
 
 # plotting
 hit_eff_data = {}
@@ -148,13 +180,23 @@ for (sample, window), counts in eff_stats.items():
     
 layer_names = ["VB0","VB1","VB2","VB3","VB4","VB5","VB6","VB7","IB0","IB1","IB2","OB0","OB1","OB2"]
 x = np.arange(len(layer_names))
-width = 0.20
-offset = {"tight": -1.5*width, "medium": -0.5*width, "loose": 0.5*width, "mira_time": 1.5*width, "pt10": 1.5*width, "pt5": 0.5*width}
+width = 0.30
+offset = {"tight": -width, "medium": 0, "loose": width}
 colors = {"tight":"maroon", "medium": "teal", "loose":"palevioletred", "mira_time": "goldenrod", "pt10": "tab:blue", "pt5": "tab:green"}
 
+sample_to_mass = {"1000_10": "1 TeV Staus", 
+                  "2500_10": "2.5 TeV Staus",
+                  "3000_10": "3 TeV Staus",
+                  "3500_10": "3.5 TeV Staus", 
+                  "4000_10": "4 TeV Staus",
+                  "4500_10": "4.5 TeV Staus"}
+window_labels = {"loose": "Loose", 
+                 "medium": "Medium",
+                 "tight": "Nominal", 
+                 "mira_time": "Newest"}
 with PdfPages(pdf_path) as pdf:
     for sample in samples:
-        fig, ax = plt.subplots(figsize=(9,3))
+        fig, ax = plt.subplots(figsize=(9,4))
         for window in windows:
             eff = np.asarray(hit_eff_data[window][sample]["eff"], dtype=float) * 100.0
             err = np.asarray(hit_eff_data[window][sample]["err"], dtype=float) * 100.0
@@ -163,15 +205,18 @@ with PdfPages(pdf_path) as pdf:
             err_clean = np.where(np.isfinite(err), err, 0.0)
             
             ax.bar(x + offset.get(window, 0.0), eff_clean, width=width,
-                   yerr=err_clean, label=window,
+                   yerr=err_clean, label=window_labels[window],
                    color=colors.get(window, None), capsize=2, linewidth=0)
         
-        ax.set_xticks(x, layer_names, ha="right", fontsize=8, rotation=45)
+        ax.set_xticks(x, layer_names, ha="right", fontsize=14, rotation=45)
         ax.set_ylim(0, 105)
+        ax.set_ylabel("Hit reconstruction efficiency (%)", fontsize=14)
+        ax.set_xlabel("Detector Subsystem, Layer", fontsize=14)
+        ax.tick_params(axis='y', labelsize=14)
 
         for xc in (7.5, 10.5):
             ax.axvline(x=xc, color='k', ls='--', alpha=0.5)
-        ax.legend(title=f"{sample},window", loc="upper right")
+        ax.legend(title=f"{sample_to_mass[sample]}", loc="upper right")
         fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
