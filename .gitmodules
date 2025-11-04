@@ -1,0 +1,4 @@
+[submodule "sim_code"]
+	path = sim_code
+	url = git@github.com:kdp-lab/mira_mucoll_scripts.git
+	branch = main
