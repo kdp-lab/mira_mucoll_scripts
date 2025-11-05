@@ -8,10 +8,14 @@ import pickle
 import pathlib
 from tqdm import tqdm
 
-# sim_dir = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency/sim/"
 reco_dir = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency/"
 reco_dir_mira = "/scratch/miralittmann/analysis/mira_analysis_code/mira_time/v3/"
 save_plot_path = "/scratch/miralittmann/analysis/efficiency_plots/new_time.pdf"
+
+tight_dir = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency/"
+medium_dir = "/scratch/miralittmann/analysis/mira_analysis_code/reder_timing/p26_p5_p6/"
+loose_dir =  "/scratch/miralittmann/analysis/mira_analysis_code/reder_timing/loose4/"
+
 CACHE = pathlib.Path("cache/efficiency.pkl")
 
 nhits3p5 = False
@@ -27,13 +31,15 @@ sample_to_mass = {
 }
 
 mass_list = [1.0, 2.5, 3.0, 3.5, 4.0, 4.5]
-windows = ["tight", "medium", "loose", "mira_time"]
-# windows = ["pt10", "pt5"]
+windows = ["tight", "medium", "loose"]
 samples = ["1000_10", "2500_10", "3000_10", "3500_10", "4000_10", "4500_10"]
-# bib_options = ["bib", "nobib"]
-bib_options = ["nobib"]
+bib_options = ["nobib", "bib"]
 fields = ["acceptance", "trackeff_bib", "trackeff_nobib"]
 vars = ["theta", "phi", "pt"]
+
+window_to_path = {"tight": tight_dir,
+                  "medium": medium_dir,
+                  "loose": loose_dir}
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--plotting", action="store_true")
@@ -107,7 +113,6 @@ def build_analysis(redo=False):
                 } for option in bib_options
             } for sample in samples
         } for window in windows}
-
     
     hit_eff_data = {
         window: {
@@ -127,14 +132,10 @@ def build_analysis(redo=False):
     for window in tqdm(windows):
         for option in bib_options: 
             for sample in samples:
-                if refitted == True:
-                    reco_path = os.path.join(reco_dir, option, window, sample, "refitted")
-                elif nhits3p5 == True:
-                    reco_path = os.path.join(reco_dir, option, window, sample, "3p5hits")
-                elif window == "mira_time":
-                    reco_path = os.path.join(reco_dir_mira, option, sample)  
+                if window == "tight":
+                    reco_path = os.path.join(window_to_path[window], option, "tight", sample)
                 else:
-                    reco_path = os.path.join(reco_dir, option, window, sample)  
+                    reco_path = os.path.join(window_to_path[window], option, sample)
 
                 print(reco_path)
                 print(f"{len(os.listdir(reco_path))} files")
@@ -368,10 +369,12 @@ def build_analysis(redo=False):
     return track_eff_data, all_data, eff_by_variable, hit_eff_data
 
 track_eff_data, all_data, eff_by_variable, hit_eff_data = build_analysis(redo=rebuild)
+print(track_eff_data)
 
 #print("10:", track_eff_data["pt10"]["4000_10"]["chi2tracks"], track_eff_data["pt10"]["4000_10"]["alltracks"])
 #print("5:", track_eff_data["pt5"]["4000_10"]["chi2tracks"], track_eff_data["pt5"]["4000_10"]["alltracks"])
 colors = {"tight":"maroon", "medium": "teal", "loose":"palevioletred", "mira_time": "goldenrod", "pt10": "tab:blue", "pt5": "tab:green"}
+window_labels = {"tight": "Tight", "medium": "Medium", "loose": "Loose"}
 ########################################## PLOTTING ######################################
 if plotting == True:
     print("Now making plots...")
@@ -455,8 +458,8 @@ if plotting == True:
                 err_nobib.append(track_eff_data[window][sample]["trackeff_nobib"]["err"][0]*100) 
             marker = marker_map[window]
             
-            ax.errorbar(mass_list, trackeff_bib, yerr=(err_bib), fmt=f"{marker}-", ms=9, color=colors[window], label=f"{window} BIB", linewidth=3)
-            ax.errorbar(mass_list, trackeff_nobib, yerr=(err_nobib), fmt=f"{marker}:", ms=9, color=colors[window], alpha=0.5, label=f"{window} no BIB", linewidth=3)
+            ax.errorbar(mass_list, trackeff_bib, yerr=(err_bib), fmt=f"{marker}-", ms=9, color=colors[window], label=f"{window_labels[window]}, BIB", linewidth=3)
+            ax.errorbar(mass_list, trackeff_nobib, yerr=(err_nobib), fmt=f"{marker}:", ms=9, color=colors[window], alpha=0.5, label=f"{window_labels[window]}, no BIB", linewidth=3)
 
         ax.set_xlabel("Stau mass [TeV]", fontsize=LABEL_FONTSIZE, labelpad=4)
         ax.set_ylabel("Track reconstruction efficiency (%)", fontsize=LABEL_FONTSIZE, labelpad=4)
@@ -651,7 +654,7 @@ if plotting == True:
         # eff_vs_theta(pdf)
         # eff_vs_pt(pdf)
         # eff_vs_phi(pdf)
-        eff_by_layer(pdf)
+        # eff_by_layer(pdf)
         # eff_vs_eta(pdf)
         
     print(f"Saved plot(s) to {save_plot_path}")
