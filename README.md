@@ -1,3 +1,5 @@
-now running analysis with condor, so should just have to change reco/sim_analysis.submit. this executes reco/sim_analysis.sh which calls reco/sim_analysis.py. then efficiency.py is used to calculate efficiency
-most recent raw .slcio files are saved in /ospool/uc-shared/project/futurecolliders/miralittmann/< reco or sim or digi >/efficiency/< bib or nobib >/< loose or medium or tight >/ < sample >/
-and most recent reco .json files are in /scratch/miralittmann/analysis/mira_analysis_code/efficiency/< bib or nobib > /< loose or medium or tight >/< sample >/
+Files to run simulation, digitization, and reco are in https://github.com/mlittmann/llp_sim_code. This contains everything for running with MuColl_v1 geometry as well as MAIA, and also (hopefully) contains what one would need for editing Marlin track processors and running locally with those changes.
+
+In this repo are the scripts I've been using for running any sort of analysis. efficiency/efficiency_from_slcio.py runs overall tracking plots, there is also an older version that does this from .jsons but I have found it's most efficient to just run directly with slcios. I've been saving things to caches as well in order to make plots in the same file as the data collection without taking too much time.
+
+
