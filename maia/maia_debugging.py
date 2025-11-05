@@ -24,6 +24,7 @@ def analyze_slcio(path, coned=True):
     print(path)
     for event in reader:
         names = event.getCollectionNames()
+        print(names)
         mcp_collection = event.getCollection("MCParticle")
         track_collection = event.getCollection("SiTracks") if "SiTracks" in names else None
         track_relation_collection = event.getCollection("MCParticle_SiTracks") if "MCParticle_SiTracks" in names else None
@@ -108,10 +109,4 @@ def analyze_slcio(path, coned=True):
 # print(f" coned, no bib")
 # analyze_slcio("/ospool/uc-shared/project/futurecolliders/miralittmann/maia/09-04_reco_coned_nobib.slcio", coned=True)
 print(f"\n coned, bib")
-analyze_slcio("/ospool/uc-shared/project/futurecolliders/miralittmann/maia/09-04_reco_coned_bib.slcio", coned=True)
-# print(f"\n unconed, no bib")
-# analyze_slcio("/ospool/uc-shared/project/futurecolliders/miralittmann/maia/09-04_reco_unconed_nobib.slcio", coned=False)
-# print(f"\n unconed, bib")
-# analyze_slcio("/ospool/uc-shared/project/futurecolliders/miralittmann/maia/09-04_reco_unconed_bib.slcio", coned=False)
-print(f"\n ====================== fix attempt 10% BIB ================== ") 
-analyze_slcio("/ospool/uc-shared/project/futurecolliders/miralittmann/maia/09-05_reco_10pbib.slcio")
+analyze_slcio("/ospool/uc-shared/project/futurecolliders/miralittmann/MAIA/reco/nominal/bib/1000_10/1000_10_reco0.slcio", coned=True)

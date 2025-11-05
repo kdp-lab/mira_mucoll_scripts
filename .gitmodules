@@ -1,3 +1,9 @@
 [submodule "sim_code"]
 	path = sim_code
 	url = git@github.com:mlittmann/llp_sim_code.git
+[submodule "maia/janplots/maia_detector_paper"]
+	path = maia/janplots/maia_detector_paper
+	url = git@github.com:kdp-lab/maia_detector_paper.git
+[submodule "maia/janplots/SLCIO-Analyzer"]
+	path = maia/janplots/SLCIO-Analyzer
+	url = git@github.com:kdp-lab/SLCIO-Analyzer.git

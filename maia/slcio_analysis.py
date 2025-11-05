@@ -27,7 +27,7 @@ sim_to_name = {
 
 stau_ids = {1000015, -1000015, 2000015, -2000015} 
 reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
-reco_slcio_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/maia/reco/10pbib"
+reco_slcio_path = "/ospool/uc-shared/project/futurecolliders/miralittmann/maia/reco/10pbib/4000_10"
 n_files = 50
 
 Bfield = 5.0
@@ -49,9 +49,12 @@ class AnalyzeResults:
     yes_ob_pTs: list
     no_ob_pT_res: list
     no_ob_pTs: list
+    stau_etas: list
+    stau_phi_truth: list
+    stau_pT_truth: list
 
 # returns:  total_staus, total_accepted_staus, total_tracks, total_good_tracks, total_contaminated_tracks, total_track_pT, total_pT_resolution
-def analyze_single_slcio(path, event_print=False, track_print=False, redo=False):
+def analyze_single_slcio(sample, path, event_print=False, track_print=False, redo=False):
 
     if CACHE.exists() and not redo:
         print(f"Loading previous arrays from {CACHE}, not re-calculating entire analysis")
@@ -75,9 +78,12 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
     no_ob_pTs = []
     yes_ob_pT_res = []
     no_ob_pT_res = []
+    stau_etas = []
+    stau_pT_truth = []
+    stau_phi_truth = []
 
     for ifile in range(n_files):
-        file_name = f"4000_10_reco{ifile}.slcio"
+        file_name = f"{sample}_reco{ifile}.slcio"
         file_path = os.path.join(path,file_name)
         reader.open(file_path) 
         event_tracks = 0
@@ -122,12 +128,11 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
                 event_tracks += len(track_collection)
 
             # mcp by mcp acceptance
-            seen_staus = ()
             for mcp in mcp_collection:
                 mcp_stau_vertex_r = np.sqrt(mcp.getVertex()[0]**2 + mcp.getVertex()[1]**2)
                 travel_dist = np.sqrt(mcp.getEndpoint()[0]**2 + mcp.getEndpoint()[1]**2 + mcp.getEndpoint()[2]**2)
                 
-                if abs(mcp.getPDG()) not in stau_ids or mcp.id() in seen_staus or travel_dist==0 or mcp_stau_vertex_r>553.0:
+                if abs(mcp.getPDG()) not in stau_ids or travel_dist==0 or mcp_stau_vertex_r>553.0:
                     continue
                 
                 total_staus += 1
@@ -176,6 +181,11 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
                     tlv = ROOT.TLorentzVector()
                     tlv.SetPxPyPzE(mom[0], mom[1], mom[2], truth_stau.getEnergy())
                     pT_truth = tlv.Perp()
+                    eta = tlv.Eta()
+                    stau_pT_truth.append(pT_truth)
+                    phi = tlv.Phi()
+                    stau_phi_truth.append(phi)
+                    stau_etas.append(eta) 
 
                 if track_mcps:
                     track_chi2 = track.getChi2() / track.getNdf()
@@ -183,6 +193,8 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
                     vb_hits = 0
                     ib_hits = 0
                     ob_hits = 0
+
+                    stau = False
 
                     if track_chi2 < chi2_cut and track_hit_count > nhits_cut:
                         good=True
@@ -193,18 +205,23 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
                     
                     for mcp in track_mcps:
                         track_pdg = mcp.getPDG()
-
+                        if track_pdg in stau_ids:
+                            stau = True
                     
                     hit_in_ob = False
                     hit_positions = []
                     for hit in track_hits:
                         decoder.setValue(int(hit.getCellID0()))
                         system = decoder["system"].value()
-                        if system==1:
+                        side = decoder["side"].value()
+                        module = decoder["module"].value()
+                        sensor = decoder["sensor"].value()
+                        print(module, sensor)
+                        if system in (1,2):
                             vb_hits += 1
-                        elif system==3:
+                        elif system in (3,4):
                             ib_hits += 1
-                        elif system==5:
+                        elif system in (5,6):
                             ob_hits += 1
                             hit_in_ob = True
 
@@ -223,6 +240,8 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
                                     for sh in (nav.getRelatedToObjects(h) or nav.getRelatedFromObjects(h) or [])
                                     if sh.getMCParticle()), None)
                         pdgs.append(pdg)
+                        if pdg in stau_ids and stau == False:
+                            stau = True
 
                     num_bib_hits = pdgs.count(None)
                     if num_bib_hits > 0:
@@ -239,23 +258,27 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
                         "pT": pT,
                         "hit_in_ob": hit_in_ob
                     }
-
-                    total_track_pT.append(pT)
-                    total_pT_resolution.append((pT - pT_truth)/pT_truth)
-                    if hit_in_ob:
+                    
+                    if pT is not None:
+                        total_track_pT.append(pT)
+                    if pT_truth is not None and pT_truth > 0:
+                        total_pT_resolution.append((pT - pT_truth)/pT_truth)
+                    if hit_in_ob and pT is not None and pT_truth is not None and pT_truth>0:
                         yes_ob_pT_res.append((pT - pT_truth)/pT_truth)
                         yes_ob_pTs.append(pT)
-                    else:
+                    elif pT is not None and pT_truth is not None and pT_truth>0:
                         no_ob_pT_res.append((pT - pT_truth)/pT_truth)
                         no_ob_pTs.append(pT)
                     
-                    if track_print == True:
+                    reader.close()
+                    
+                    if track_print == True and stau == True:
                         print(f"=============== Track {itrack} ==============")
                         print(f"PDG: {track_pdg}")
                         for ihit,(x, y, z, system, layer) in enumerate(hit_positions):
                             print(f"{pdgs[ihit]} Hit: System {system}, Layer {layer} at ({x:.2f}, {y:.2f}, {z:.2f})")
                         print(f"Reduced Chi^2: {track_chi2:.2f}")
-                        print(f"{vb_hits} VB hits, {ib_hits} IB hits, {ob_hits} OB hits")
+                        print(f"{vb_hits} Vertex hits, {ib_hits} Inner hits, {ob_hits} Outer hits")
                         print(f"Good track? {good}")                
                         print(f"Track pT value: {event_track_info[itrack]['pT']:.2f} GeV")
                         if pT_truth is not None:
@@ -273,7 +296,8 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
     print(f"{total_accepted_staus} accepted staus")
     print(f"{total_tracks} tracks")
     print(f"{total_good_tracks} good stau tracks")
-    print(f"{(total_good_tracks / total_accepted_staus)*100:.2f}% efficiency")
+    if total_accepted_staus > 0:
+        print(f"{(total_good_tracks / total_accepted_staus)*100:.2f}% efficiency")
     print(f"{total_contaminated_tracks} stau tracks contaminated by BIB hits where {total_tracks_morethanone_bib} have more than one BIB hit")
 
     res = AnalyzeResults(
@@ -288,6 +312,9 @@ def analyze_single_slcio(path, event_print=False, track_print=False, redo=False)
         yes_ob_pTs,
         no_ob_pT_res,
         no_ob_pTs,
+        stau_etas,
+        stau_phi_truth,
+        stau_pT_truth,
     )
     print(f"Writing cache --> {CACHE}")
     CACHE.parent.mkdir(exist_ok=True)
@@ -354,10 +381,33 @@ def make_pt_plots(res):
         ax.legend()
         pdf.savefig(fig); plt.close(fig)
 
+        bins_eta = np.linspace(1, 1.5, 51)
+        etas = np.abs(np.array(res.stau_etas))
+        n_eta, _ = np.histogram(etas, bins=bins_eta)
+        centers = 0.5 * (bins_eta[1:] + bins_eta[:-1])
+        fig, ax = plt.subplots(figsize=(7,6))
+        ax.step(bins_eta[:-1], n_eta, where="post")
+        ax.errorbar(centers, n_eta, yerr=np.sqrt(n_eta), fmt='.', ms=3)
+        ax.set_xlabel("Stau eta", fontsize=15)
+        ax.set_ylabel("Counts", fontsize=15)
+        ax.tick_params(axis="both", labelsize=14)
+        ax.grid(True, alpha=0.3)
+        pdf.savefig(fig); plt.close(fig)
+
     print(f"Plots saved to {plot_path}")    
 
 
-res = analyze_single_slcio(reco_slcio_path, event_print=True, track_print=True, redo=True)
-make_pt_plots(res)
-print(f"For the {len(res.yes_ob_pTs)} tracks that have at least one hit in OB, mean resolution is {np.mean(res.yes_ob_pT_res)*100:.2f}% and mean pT is {np.mean(res.yes_ob_pTs):.2f} GeV")
-print(f"For the {len(res.no_ob_pTs)} tracks that DON'T have at least one hit in OB, mean resolution is {np.mean(res.no_ob_pT_res)*100:.2f}% and mean pT is {np.mean(res.no_ob_pTs):.2f} GeV")
+res4tev = analyze_single_slcio("4000_10", reco_slcio_path, event_print=True, track_print=True, redo=True)
+make_pt_plots(res4tev)
+print(f"For the {len(res4tev.yes_ob_pTs)} tracks that have at least one hit in OB, mean resolution is {np.mean(res4tev.yes_ob_pT_res)*100:.2f}% and mean pT is {np.mean(res4tev.yes_ob_pTs):.2f} GeV")
+print(f"For the {len(res4tev.no_ob_pTs)} tracks that DON'T have at least one hit in OB, mean resolution is {np.mean(res4tev.no_ob_pT_res)*100:.2f}% and mean pT is {np.mean(res4tev.no_ob_pTs):.2f} GeV")
+
+path_1tev = "/ospool/uc-shared/project/futurecolliders/miralittmann/maia/reco/10pbib/1000_10/"
+res1tev = analyze_single_slcio("1000_10", path_1tev, event_print=False, track_print=True, redo=True)
+make_pt_plots(res1tev)
+print(f"For the {len(res1tev.yes_ob_pTs)} tracks that have at least one hit in OB, mean resolution is {np.mean(res1tev.yes_ob_pT_res)*100:.2f}% and mean pT is {np.mean(res1tev.yes_ob_pTs):.2f} GeV")
+print(f"For the {len(res1tev.no_ob_pTs)} tracks that DON'T have at least one hit in OB, mean resolution is {np.mean(res1tev.no_ob_pT_res)*100:.2f}% and mean pT is {np.mean(res1tev.no_ob_pTs):.2f} GeV")
+
+print(" ")
+print(res4tev.stau_pT_truth)
+print(res1tev.stau_pT_truth)
