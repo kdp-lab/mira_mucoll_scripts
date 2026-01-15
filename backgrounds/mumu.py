@@ -28,6 +28,7 @@ print(dirs.items())
 n_files = 2500
 Bfield = 3.57
 speedoflight = 299792458/1000000  # mm/ns
+chi2_cut = 3
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--rebuild", action="store_true")
@@ -144,6 +145,10 @@ if stats is None:
                     nav = UTIL.LCRelationNavigator(track_relation_collection)
                     
                     for itrack, track in enumerate(track_collection):
+                        chi2 = track.getChi2()
+                        ndf = track.getNdf()
+                        if (chi2/ndf) > chi2_cut:
+                            continue
                         track_mcps = nav.getRelatedFromObjects(track)
                         track_hits = track.getTrackerHits()
                         
@@ -211,12 +216,25 @@ if stats is None:
         print(f"Writing cache to {CACHE}")
     print("Saved cache successfully.")
 
-def plot_feature(feature, n_bins):
+labels = {"pT": r"$p_T$ [GeV]",
+          "hits": "Hits on track",
+          "velo": "Velocity [mm/ns]"}
+
+def plot_feature(feature, n_bins, x_lim=None):
     fig, ax = plt.subplots()
     feature_arr = np.asarray(stats[window][option][feature])
+    if x_lim:
+        mask = (feature_arr >= x_lim[0]) & (feature_arr <= x_lim[1])
+        feature_arr = feature_arr[mask]
     weights = np.full_like(feature_arr, 100.0/feature_arr.size, dtype=float)
     ax.hist(feature_arr, bins=n_bins, weights=weights, histtype="step", facecolor="none")
-    ax.set_xlabel(feature, fontsize=20)
+    ax.set_xlabel(labels[feature], fontsize=20)
+    ax.set_ylabel("Normalized counts", fontsize=20)
+    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+    if x_lim:
+        ax.set_xlim(x_lim[0], x_lim[1])
+
     ax.text(
         0.02, 0.98,
         "Muon Collider",
@@ -244,13 +262,59 @@ def plot_feature(feature, n_bins):
     pdf.savefig(fig)
     plt.close(fig)
 
+def plot_pt_vs_hits(pT_lim=(0, 10000), hits_lim=None, pT_bins=40, hits_bins=10):
+    fig, ax = plt.subplots()
+
+    pT = np.asarray(stats[window][option]["pT"], dtype=float)
+    hits = np.asarray(stats[window][option]["hits"], dtype=float)
+
+    m = np.isfinite(pT) & np.isfinite(hits)
+    if pT_lim is not None:
+        m &= (pT >= pT_lim[0]) & (pT <= pT_lim[1])
+    if hits_lim is not None:
+        m &= (hits >= hits_lim[0]) & (hits <= hits_lim[1])
+
+    pT = pT[m]
+    hits = hits[m]
+
+    if pT.size == 0:
+        plt.close(fig)
+        return
+
+    h = ax.hist2d(
+        hits, pT,
+        bins=[hits_bins, pT_bins],
+        range=[hits_lim, pT_lim] if (hits_lim is not None and pT_lim is not None) else None,
+        cmap="viridis",
+    )
+    cb = fig.colorbar(h[3], ax=ax)
+    cb.set_label("Counts", fontsize=14)
+
+    ax.set_xlabel("Number of hits on track", fontsize=20)
+    ax.set_ylabel(r"$p_T$ [GeV]", fontsize=20)
+    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+
+    ax.text(0.02, 0.98, "Muon Collider", ha="left", va="top",
+            transform=ax.transAxes, fontsize=20, fontweight="bold", style="italic", color="white")
+    ax.text(0.02, 0.90, f"muons, {option}, {window}", ha="left", va="top",
+            transform=ax.transAxes, fontsize=15, color="white")
+    ax.text(0.02, 0.83, "MuColl_v1", ha="left", va="top",
+            transform=ax.transAxes, fontsize=15, color="white")
+
+    fig.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 with PdfPages(plot_path) as pdf:
     for window in windows:
         for option in bib_options:
-            pT_bins = 30
-            hit_bins = 20
-            velo_bins = 20
-            plot_feature("pT", pT_bins)
+            pT_bins = 10
+            hit_bins = 10
+            velo_bins = 10
+            plot_feature("pT", pT_bins, x_lim=(0,10000))
             plot_feature("hits", hit_bins)
-            plot_feature("velo", velo_bins)
+            plot_feature("velo", velo_bins, x_lim=(150,450))
+            plot_pt_vs_hits(pT_lim=(0, 10000), hits_bins=10, pT_bins=10)
 print(f"Saved plots to {plot_path}") 
