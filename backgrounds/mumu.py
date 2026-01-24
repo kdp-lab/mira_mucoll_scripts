@@ -20,10 +20,12 @@ import ROOT
 
 dirs = {"bib": "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mumu_bkg/bib/",
         "nobib": "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mumu_bkg/nobib/"}
-windows = ["loose", "nominal"]
-bib_options = ["bib", "nobib"]
-CACHE = pathlib.Path("cache/mumu_bkg_stats.pkl")
-plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_tracks.pdf"
+# windows = ["loose", "nominal"]
+# bib_options = ["bib", "nobib"]
+bib_options = ["nobib"]
+windows = ["nominal"]
+CACHE = pathlib.Path("cache/mumu_bkg_stats_nominal_nobib.pkl")
+plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_tracks_nominal_nobib.pdf"
 print(dirs.items())
 n_files = 2500
 Bfield = 3.57
@@ -56,6 +58,8 @@ system_to_relname = {
 }
 
 guess_velo = 180
+
+track_reqs = ["vb", "ib", "ob"]
 
 def linearfunc(p, x):
     # p[0] = velocity [mm/ns], p[1] = intercept [mm]
@@ -104,20 +108,33 @@ if (not rebuild) and os.path.exists(CACHE):
 
 if stats is None:
     stats = {
-        window:
-        {"bib": {
-            "pT": [],
-            "hits": [],
-            "velo": []},
-        "nobib": {
-            "pT": [],
-            "hits": [],
-            "velo": []},
-        } for window in windows
-        } 
+        window: {
+            req: {
+                "bib": {
+                    "pT": [],
+                    "hits": [],
+                    "velo": [],
+                    "mass": []
+                },
+                "nobib": {
+                    "pT": [],
+                    "hits": [],
+                    "velo": [],
+                    "mass": []
+                }
+            }
+            for req in track_reqs
+        }
+        for window in windows
+    }
+
+         
     reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
     
     for window in windows:
+        total_tracks = 0
+        no_eta_cut = 0
+        super_lum = 0
         print(f"Analyzing {window} window...")
         for option in bib_options:
             print(f"Analyzing {option}...")
@@ -145,6 +162,7 @@ if stats is None:
                     nav = UTIL.LCRelationNavigator(track_relation_collection)
                     
                     for itrack, track in enumerate(track_collection):
+                        total_tracks += 1
                         chi2 = track.getChi2()
                         ndf = track.getNdf()
                         if (chi2/ndf) > chi2_cut:
@@ -158,6 +176,9 @@ if stats is None:
                                 momentum = mcp.getMomentum()
                                 tlv = ROOT.TLorentzVector()
                                 tlv.SetPxPyPzE(momentum[0], momentum[1], momentum[2], mcp.getEnergy())
+                                if abs(tlv.Eta()) > 0.8:
+                                    no_eta_cut += 1
+                                    continue
                                 true_pT = tlv.Perp()
                                 true_beta = tlv.Beta()
                                 true_velo = true_beta * speedoflight
@@ -202,13 +223,51 @@ if stats is None:
                                     track_pos.append(hit_pos)
 
                                 v_fit, v_err = reco_velo(linearfunc, track_times, track_pos, spatial_unc) 
+                                if np.isfinite(v_fit) and v_fit > speedoflight:
+                                    super_lum += 1
+                                    v_fit = speedoflight
+                                beta = v_fit / speedoflight
+
                                 total_hits = vb_hits + ib_hits + ob_hits
                                 pT_res = (reco_pT - true_pT) / true_pT
                                 velo_res = (v_fit - true_velo) / true_velo
 
-                                stats[window][option]["pT"].append(reco_pT)
-                                stats[window][option]["velo"].append(v_fit)
-                                stats[window][option]["hits"].append(total_hits)
+                                try:
+                                    tanL = track.getTanLambda()
+                                except Exception:
+                                    tanL = np.nan
+
+                                if np.isfinite(tanL):
+                                    reco_pz = reco_pT * tanL
+                                    reco_p  = math.sqrt(reco_pT**2 + reco_pz**2)
+                                else:
+                                    reco_p  = np.nan
+                                
+                                if np.isfinite(reco_p) and np.isfinite(beta) and (0 < beta <= 1):
+                                    m_reco = reco_p * math.sqrt(1.0/(beta*beta) - 1.0)
+                                else:
+                                    m_reco = np.nan
+
+                                if vb_hits >= 3 and ib_hits >= 2 and ob_hits >=2:
+                                    stats[window]["ob"][option]["pT"].append(reco_pT)
+                                    stats[window]["ob"][option]["velo"].append(v_fit)
+                                    stats[window]["ob"][option]["hits"].append(total_hits)
+                                    stats[window]["ob"][option]["mass"].append(m_reco)
+                                
+                                if vb_hits >= 3 and ib_hits >= 2:
+                                    stats[window]["ib"][option]["pT"].append(reco_pT)
+                                    stats[window]["ib"][option]["velo"].append(v_fit)
+                                    stats[window]["ib"][option]["hits"].append(total_hits)
+                                    stats[window]["ib"][option]["mass"].append(m_reco)
+                                
+                                if vb_hits >= 3:
+                                    stats[window]["vb"][option]["pT"].append(reco_pT)
+                                    stats[window]["vb"][option]["velo"].append(v_fit)
+                                    stats[window]["vb"][option]["hits"].append(total_hits)
+                                    stats[window]["vb"][option]["mass"].append(m_reco)
+        print(f"{total_tracks} tracks")
+        print(f"{no_eta_cut} tracks didn't pass eta cut")
+        print(f"{super_lum} tracks with v > c")
     print(stats)
     CACHE.parent.mkdir(exist_ok=True)
     with CACHE.open("wb") as f:
