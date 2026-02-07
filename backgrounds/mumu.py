@@ -109,6 +109,50 @@ def reco_velo(function_type, times, pos, spatial_unc):
 
     return float(p[0]), v_err
 
+def linearfunc_no_intercept(v, x):
+    return v * x
+def residual_no_intercept(v, times, pos, spatial_unc, time_unc):
+    vv = float(np.atleast_1d(v)[0])
+    s_eff = np.sqrt(np.asarray(spatial_unc, float)**2 + (vv * np.asarray(time_unc, float))**2)
+    return (linearfunc_no_intercept(vv, times) - pos) / s_eff
+def reco_velo_no_intercept(times, pos, spatial_unc, time_unc):
+    x = np.asarray(times, dtype=float)
+    y = np.asarray(pos, dtype=float)
+    sr = np.asarray(spatial_unc, dtype=float)
+    st = np.asarray(time_unc, dtype=float)
+
+    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(sr) & np.isfinite(st) & (sr > 0) & (st > 0)
+    x, y, sr, st = x[m], y[m], sr[m], st[m]
+
+    if x.size < 3 or np.allclose(x, x.mean()):
+        return np.nan, np.nan
+
+    v0 = np.array([guess_velo])
+
+    fit = optimize.least_squares(
+        residual_no_intercept,
+        v0,
+        args=(x, y, sr, st),
+        jac="2-point"
+    )
+
+    v = float(fit.x[0])
+
+    try:
+        s_eff = np.sqrt(sr**2 + (v * st)**2)
+        J = fit.jac
+        dof = max(1, x.size - 1)
+        chi2 = np.sum(((v * x - y) / s_eff) ** 2)
+        sigma2 = chi2 / dof
+        cov = np.linalg.inv(J.T @ J) * sigma2
+        v_err = float(np.sqrt(cov[0, 0]))
+    except Exception:
+        v_err = np.nan
+
+    return v, v_err
+
+
+
 stats = None
 if (not rebuild) and os.path.exists(CACHE):
     with open(CACHE, "rb") as f:
@@ -171,7 +215,13 @@ if stats is None:
         print(f"Analyzing {window} window...")
         for option in bib_options:
             print(f"Analyzing {option}...")
-            for ifile in tqdm(range(n_files)):
+            leading_mass = []
+            sub_leading_mass = []
+            leading_mass_evt = []
+            subleading_mass_evt = []
+            stats[window]["vb"][option]["leading_mass"] = []
+            stats[window]["vb"][option]["subleading_mass"] = []
+            for ifile in tqdm(range(n_files)): 
                 file_name = f"mumu_bkg_reco{ifile}.slcio"
                 file_path = os.path.join(dirs[option], window, file_name)
                 if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
@@ -179,6 +229,7 @@ if stats is None:
                     continue
                 reader.open(file_path)
                 for event in reader:
+                    event_masses = []
                     rel_nav = build_rel_nav(event)
                     all_collections = event.getCollectionNames() 
                     mcp_collection = event.getCollection("MCParticle") if "MCParticle" in all_collections else None
@@ -228,11 +279,46 @@ if stats is None:
                                 time_unc = []
                                 track_xyz = []
 
+                                track_sim_r = []
+                                track_sim_t = []
+                                hit_is_muon = [] 
+
 
                                 for hit in track_hits:
                                     decoder.setValue(int(hit.getCellID0()))
                                     system = decoder["system"].value()
                                     layer = decoder["layer"].value()
+                                    sim_r = np.nan
+                                    sim_t = np.nan
+
+                                    relname = system_to_relname.get(system, None)
+                                    if relname is not None:
+                                        nav_rel = rel_nav[relname]
+
+                                        simhits = nav_rel.getRelatedToObjects(hit)
+
+                                        if simhits:
+                                            sh = simhits[0] 
+                                            try:
+                                                mcp = sh.getMCParticle()         
+                                                is_mu = (mcp is not None) and (abs(mcp.getPDG()) == 13)
+                                            except Exception:
+                                                is_mu = False
+
+                                            hit_is_muon.append(is_mu)
+                                            sx = sh.getPosition()[0] 
+                                            sy =  sh.getPosition()[1]
+                                            sz =  sh.getPosition()[2]
+                                            sim_r = math.sqrt(sx*sx + sy*sy + sz*sz)
+                                            sim_t = sh.getTime()
+
+                                            track_sim_r.append(sim_r)
+                                            track_sim_t.append(sim_t)
+
+                                            is_mu = False
+
+
+
                                     if system in (1,2):
                                         vb_hits += 0.5
                                         spatial_unc.append(0.005)
@@ -265,7 +351,7 @@ if stats is None:
                                     track_times.append(corrected_corrected_t)
                                     track_pos.append(hit_pos)
 
-                                v_fit, v_err = reco_velo(linearfunc, track_times, track_pos, spatial_unc) 
+                                v_fit, v_err = reco_velo_no_intercept(track_times, track_pos, spatial_unc, time_unc) 
                                 if np.isfinite(v_fit) and v_fit > speedoflight:
                                     super_lum += 1
                                     v_fit = speedoflight
@@ -290,6 +376,9 @@ if stats is None:
                                     m_reco = reco_p * math.sqrt(1.0/(beta*beta) - 1.0)
                                 else:
                                     m_reco = np.nan
+                                
+                                if np.isfinite(m_reco) and (vb_hits >= 3 and ib_hits >= 2 and ob_hits >= 2):
+                                    event_masses.append(m_reco)
 
                                 if SAVE_TRACK_DISPLAYS and (len(track_displays) < MAX_TRACK_DISPLAYS):
                                     ok = True
@@ -304,6 +393,8 @@ if stats is None:
 
                                         mfit = np.isfinite(tt) & np.isfinite(rr) & np.isfinite(ss) & (ss > 0)
                                         tt2, rr2, ss2 = tt[mfit], rr[mfit], ss[mfit]
+                                        mu_flags = np.asarray(hit_is_muon, dtype=object)
+                                        mu2 = mu_flags[mfit].tolist()
 
                                         b_fit = np.nan
                                         if np.isfinite(v_fit) and tt2.size >= 2:
@@ -331,6 +422,15 @@ if stats is None:
                                             "true_beta": float(true_beta) if np.isfinite(true_beta) else np.nan,
                                             "true_mass": float(true_mass) if np.isfinite(true_mass) else np.nan,
                                             "true_eta": float(true_eta) if np.isfinite(true_eta) else np.nan,
+
+                                            "reco_t": tt2.tolist(),
+                                            "reco_r": rr2.tolist(),
+                                            "reco_unc": ss2.tolist(),
+
+                                            "sim_t": np.asarray(track_sim_t, dtype=float)[mfit].tolist(),
+                                            "sim_r": np.asarray(track_sim_r, dtype=float)[mfit].tolist(),
+
+                                            "hit_is_muon": mu2,
                                         })
 
                                 
@@ -391,6 +491,15 @@ if stats is None:
                                     stats[window]["vb"][option]["v_fit_err"].append(v_err)
                                     stats[window]["vb"][option]["full_p"].append(reco_p)
                                     stats[window]["vb"][option]["true_mass"].append(true_mass)
+                    if len(event_masses) >= 1:
+                        event_masses.sort(reverse=True)
+                        stats[window]["vb"][option]["leading_mass"].append(event_masses[0])
+                        if len(event_masses) >= 2:
+                            stats[window]["vb"][option]["subleading_mass"].append(event_masses[1])
+                        else:
+                            stats[window]["vb"][option]["subleading_mass"].append(float("nan"))
+
+
 
         print(f"{total_tracks} tracks")
         print(f"{no_eta_cut} tracks didn't pass eta cut")
@@ -756,20 +865,188 @@ def plot_track_display(rec, pdf):
     pdf.savefig(fig)
     plt.close(fig)
 
-vb_r = [30, 51, 74, 102]
-vb_l = 130
-ve_z = [80, 120, 200, 280]
-ve_h = [0, 15, 35, 50]
+def plot_track_rt_display(rec, pdf):
+    reco_t = np.asarray(rec["reco_t"], dtype=float)
+    reco_r = np.asarray(rec["reco_r"], dtype=float)
+    reco_s = np.asarray(rec["reco_unc"], dtype=float)
 
-ib_r = [127, 340, 554]
-ib_l = [963.2, 963.2, 1384.6]
-ie_z = [524, 808, 1093, 1377, 1661, 1946, 2190]
-ie_h = np.arange(100, 300, (300-100)/7)
+    sim_t  = np.asarray(rec["sim_t"], dtype=float)
+    sim_r  = np.asarray(rec["sim_r"], dtype=float)
 
-ob_r = [819, 1153, 1486]
-ob_l = 2528.4
-oe_z = [1310, 1617, 1883, 2190]
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
 
+    m = np.isfinite(sim_t) & np.isfinite(sim_r)
+
+    mu = np.asarray(rec.get("hit_is_muon", []), dtype=object)
+    if mu.size != reco_t.size:
+        mu = np.ones_like(reco_t, dtype=bool)
+
+    mu_mask = (mu == True)
+    nonmu_mask = (mu == False)
+
+    if np.any(mu_mask):
+        ax.errorbar(
+            reco_t[mu_mask], reco_r[mu_mask], yerr=reco_s[mu_mask],
+            fmt="o", markersize=7,
+            label="Reco hits (muon)",
+            alpha=0.8
+        )
+
+    if np.any(nonmu_mask):
+        ax.errorbar(
+            reco_t[nonmu_mask], reco_r[nonmu_mask], yerr=reco_s[nonmu_mask],
+            fmt="o", markersize=7,
+            label="Reco hits (non-muon)",
+            alpha=0.8
+        )
+
+    if np.any(m):
+        ax.scatter(
+            sim_t[m], sim_r[m],
+            s=50,
+            color="tab:red",
+            marker="x",
+            label="Sim hits"
+        )
+
+    v_fit = rec.get("v_fit", np.nan)
+    b_fit = rec.get("b_fit", np.nan)
+    if np.isfinite(v_fit) and np.isfinite(b_fit):
+        tline = np.linspace(np.min(reco_t), np.max(reco_t), 200)
+        ax.plot(tline, v_fit*tline + b_fit,
+                color="black", linewidth=2,
+                label="Velocity fit")
+
+    ax.set_xlabel("Time [ns]", fontsize=14)
+    ax.set_ylabel(r"$r_{xyz}$ [mm]", fontsize=14)
+
+    ax.legend(frameon=False)
+
+    ax.set_title(
+    f"m_reco = {rec['m_reco']:.1f} GeV   beta = {rec['beta']:.6f}\n"
+    f"track chi2/ndf = {rec['chi2ndf']:.6f}",
+    fontsize=12
+    )
+
+
+    fig.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
+
+def plot_mass_logx_variable_bins(req="vb",
+                                 m_range=(1e-1, 5e4),
+                                 n_bins=70,
+                                 normalize=False,
+                                 floor=0.1,
+                                 use_log_bins=True,
+                                 debug=False):
+    d = stats[window][req][option]
+    m0 = np.asarray(d["mass"], dtype=float)
+
+    if m0.size == 0:
+        return
+
+    finite = np.isfinite(m0)
+    m = m0[finite]
+
+    if m.size == 0:
+        return
+
+    if debug:
+        print(f"[mass debug] N total={m0.size}, finite={finite.sum()}, "
+              f"nan/inf={(~finite).sum()}, "
+              f"==0={np.sum(finite & (m0 == 0.0))}, <0={np.sum(finite & (m0 < 0.0))}, "
+              f"min_finite={np.min(m):.6g}")
+
+    m = np.clip(m, floor, None)
+
+    lo, hi = m_range
+    m = m[(m >= lo) & (m <= hi)]
+    if m.size == 0:
+        return
+
+    if use_log_bins:
+        edges = np.logspace(np.log10(lo), np.log10(hi), n_bins + 1)
+    else:
+        edges = np.linspace(lo, hi, n_bins + 1)
+
+    fig, ax = plt.subplots()
+
+    if normalize:
+        weights = np.full_like(m, 100.0 / m.size, dtype=float)
+        ax.hist(m, bins=edges, weights=weights, histtype="step", linewidth=1.8)
+        ax.set_ylabel("Normalized counts [%]", fontsize=20)
+    else:
+        ax.hist(m, bins=edges, histtype="step", linewidth=1.8)
+        ax.set_ylabel("Counts", fontsize=20)
+
+    ax.set_xscale("log")
+    ax.set_xlabel("Reconstructed mass [GeV]", fontsize=20)
+
+    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+
+    ax.text(0.02, 0.98, "Muon Collider", ha="left", va="top",
+            transform=ax.transAxes, fontsize=20, fontweight="bold", style="italic")
+    ax.text(0.02, 0.90, f"muons, {option}, {window}", ha="left", va="top",
+            transform=ax.transAxes, fontsize=15)
+    ax.text(0.02, 0.83, "MuColl_v1", ha="left", va="top",
+            transform=ax.transAxes, fontsize=15)
+
+    fig.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
+
+def plot_leading_subleading_masses(leading, subleading, n_bins=60, x_lim=(0, 4500)):
+    fig, ax = plt.subplots()
+
+    lead = np.asarray(leading, dtype=float)
+    sub  = np.asarray(subleading, dtype=float)
+
+    lead = lead[np.isfinite(lead)]
+    sub  = sub[np.isfinite(sub)]
+
+    if x_lim is not None:
+        lead = lead[(lead >= x_lim[0]) & (lead <= x_lim[1])]
+        sub  = sub[(sub >= x_lim[0]) & (sub <= x_lim[1])]
+
+    if lead.size > 0:
+        w = np.full_like(lead, 100.0 / lead.size, dtype=float)
+        ax.hist(lead, bins=n_bins, weights=w,
+                histtype="step", linewidth=2.0,
+                label="Leading mass")
+
+    if sub.size > 0:
+        w = np.full_like(sub, 100.0 / sub.size, dtype=float)
+        ax.hist(sub, bins=n_bins, weights=w,
+                histtype="step", linewidth=2.0,
+                label="Subleading mass")
+
+    ax.set_xlabel("Reconstructed mass [GeV]", fontsize=20)
+    ax.set_ylabel("Normalized counts [%]", fontsize=20)
+    if x_lim is not None:
+        ax.set_xlim(x_lim)
+
+    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+
+    ax.text(0.02, 0.98, "Muon Collider",
+            ha="left", va="top",
+            transform=ax.transAxes,
+            fontsize=20, fontweight="bold", style="italic")
+    ax.text(0.02, 0.90, f"muons, {option}, {window}",
+            ha="left", va="top",
+            transform=ax.transAxes,
+            fontsize=15)
+    ax.text(0.02, 0.83, "MuColl_v1",
+            ha="left", va="top",
+            transform=ax.transAxes,
+            fontsize=15)
+
+    ax.legend(frameon=False, fontsize=12)
+    fig.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
 
 
 with PdfPages(plot_path) as pdf:
@@ -804,6 +1081,14 @@ with PdfPages(plot_path) as pdf:
                 m_over_p_lim=(0, 0.4),
                 one_minus_beta_lim=(0, 0.015)
             )
+            plot_mass_logx_variable_bins(req="vb",m_range=(0.1, 10e3), n_bins=70, normalize=True)
+            plot_leading_subleading_masses(
+                stats[window]["vb"][option]["leading_mass"],
+                stats[window]["vb"][option]["subleading_mass"],
+                n_bins=60,
+                # x_lim=(0, 1000)
+            )
+
 
 
 print(f"Saved plots to {plot_path}") 
@@ -811,7 +1096,7 @@ print(f"Saved plots to {plot_path}")
 if SAVE_TRACK_DISPLAYS and len(track_displays) > 0:
     with PdfPages(TRACK_DISPLAY_PDF) as pdf2:
         for rec in track_displays:
-            plot_track_display(rec, pdf2)
+            plot_track_rt_display(rec, pdf2)
     print(f"Saved {len(track_displays)} track displays to {TRACK_DISPLAY_PDF}")
 else:
     print("No track displays saved.")

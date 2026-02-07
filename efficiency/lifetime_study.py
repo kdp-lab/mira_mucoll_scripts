@@ -26,10 +26,10 @@ loose_dir =  "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_
 window_to_dir = {"loose": loose_dir}
 n_files = 2500
 
-CACHE = pathlib.Path("cache/lifetimes-trackstats.pkl")
+CACHE = pathlib.Path("cache/lifetimes-trackstats.pkl") #-nozero
 
 plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-decaypos-full.pdf"
-track_stats_plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-trackstats.pdf"
+track_stats_plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-trackstats.pdf" # -nozero
 
 sample_to_mass = {
     "1000": 1.0,
@@ -169,7 +169,9 @@ if efficiencies is None:
                     "pT": [],
                     "hits": [],
                     "velo": [],
-                    "mass": []
+                    "mass": [],
+                    "leading_mass": [],
+                    "subleading_mass": []
                 } for track_req in track_reqs
             } for sample in sample_to_mass.keys()
         } for lifetime in lifetimes
@@ -185,6 +187,7 @@ if efficiencies is None:
             save_info = efficiencies[lifetime][sample]
 
             for ifile in tqdm(range(n_files)):
+                masses = []
                 file_name = f"{sample}_{lifetime}/{sample}_{lifetime}_reco{ifile}.slcio"
                 file_path = os.path.join(loose_dir,file_name) 
                 if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
@@ -211,6 +214,7 @@ if efficiencies is None:
 
                     nav = UTIL.LCRelationNavigator(track_relation_collection)
                     rel_nav = build_rel_nav(event)
+                    masses_by_req = {req: [] for req in track_reqs}
 
                     for mcp in mcp_collection:
                         pdg = mcp.getPDG()
@@ -297,17 +301,34 @@ if efficiencies is None:
                                     save_info["ob"]["hits"].append(total_hits)
                                     save_info["ob"]["velo"].append(v_fit)
                                     save_info["ob"]["mass"].append(m_reco) 
+                                    if np.isfinite(m_reco):
+                                        masses_by_req["ob"].append(float(m_reco))
                                 if vb_hits >= 3 and ib_hits >= 2:
                                     save_info["ib"]["pT"].append(reco_pT)
                                     save_info["ib"]["hits"].append(total_hits)
                                     save_info["ib"]["velo"].append(v_fit)
                                     save_info["ib"]["mass"].append(m_reco) 
+                                    if np.isfinite(m_reco):
+                                        masses_by_req["ib"].append(float(m_reco))
                                 if vb_hits >= 3:
                                     save_info["vb"]["pT"].append(reco_pT)
                                     save_info["vb"]["hits"].append(total_hits)
                                     save_info["vb"]["velo"].append(v_fit)
                                     save_info["vb"]["mass"].append(m_reco) 
+                                    if np.isfinite(m_reco):
+                                        masses_by_req["vb"].append(float(m_reco))
 
+                    for req in track_reqs:
+                        arr = masses_by_req[req]
+                        if len(arr) == 0:
+                            continue  
+                        arr.sort(reverse=True)
+
+                        leading = arr[0]
+                        subleading = arr[1] if len(arr) >= 2 else float("nan")  
+
+                        save_info[req]["leading_mass"].append(float(leading))
+                        save_info[req]["subleading_mass"].append(float(subleading))
 
     CACHE.parent.mkdir(exist_ok=True)
     with CACHE.open("wb") as f:
@@ -570,7 +591,10 @@ print(efficiencies.keys())
 
 labels = {"pT": r"$p_T$ [GeV]",
           "hits": "Hits on track",
-          "velo": "Velocity [mm/ns]"}
+          "velo": "Velocity [mm/ns]",
+          "leading_mass": "Leading reconstructed mass [GeV]",
+          "subleading_mass": "Subleading reconstructed mass [GeV]",}
+
 def plot_feature_all_lifetimes(sample, feature, n_bins, x_lim=None):
     fig, ax = plt.subplots()
 
@@ -631,9 +655,89 @@ def plot_feature_all_lifetimes(sample, feature, n_bins, x_lim=None):
     pdf.savefig(fig)
     plt.close(fig)
 
+def plot_mass_rank_all_lifetimes(sample, track_req, n_bins=60, x_lim=None):
+    fig, ax = plt.subplots()
+
+    for lifetime in lifetimes:
+        lead_arr = np.asarray(efficiencies[lifetime][sample][track_req]["leading_mass"], dtype=float)
+        lead_arr = lead_arr[np.isfinite(lead_arr)]
+        sub_lead_arr = np.asarray(efficiencies[lifetime][sample][track_req]["subleading_mass"], dtype=float)
+        sub_lead_arr = sub_lead_arr[np.isfinite(sub_lead_arr)]
+
+        if x_lim is not None:
+            sub_lead_arr = sub_lead_arr[(sub_lead_arr >= x_lim[0]) & (sub_lead_arr <= x_lim[1])]
+            lead_arr = lead_arr[(lead_arr >= x_lim[0]) & (lead_arr <= x_lim[1])]
+
+        if sub_lead_arr.size == 0:
+            continue
+
+        if lead_arr.size == 0:
+            continue
+
+        lead_weights = np.full_like(lead_arr, 100.0 / lead_arr.size, dtype=float)
+        sub_lead_weights = np.full_like(sub_lead_arr, 100.0 / sub_lead_arr.size, dtype=float)
+
+        ax.hist(
+            lead_arr,
+            bins=n_bins,
+            weights=lead_weights,
+            histtype="step",
+            linewidth=2,
+            label=f"Leading mass",
+        )
+        ax.hist(
+            sub_lead_arr,
+            bins=n_bins-40,
+            weights=sub_lead_weights,
+            histtype="step",
+            linewidth=2,
+            label=f"Sub-leading mass",
+        )
+
+    ax.set_xlabel("Mass [GeV]", fontsize=20)
+    ax.set_ylabel("Normalized counts", fontsize=20)
+    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+    if x_lim is not None:
+        ax.set_xlim(x_lim[0], x_lim[1])
+
+    ax.legend(fontsize=13)
+
+    ax.text(
+        0.02, 0.98,
+        "Muon Collider",
+        ha="left", va="top",
+        transform=ax.transAxes,
+        fontsize=20,
+        fontweight="bold",
+        style="italic",
+    )
+    ax.text(
+        0.02, 0.90,
+        f"Staus, {sample_to_mass[sample]} TeV, req={track_req}",
+        ha="left", va="top",
+        transform=ax.transAxes,
+        fontsize=15
+    )
+    ax.text(
+        0.02, 0.83,
+        "MuColl_v1, No BIB",
+        ha="left", va="top",
+        transform=ax.transAxes,
+        fontsize=15
+    )
+
+    fig.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 with PdfPages(track_stats_plot_path) as pdf:
     for sample in sample_to_mass.keys():
-        plot_feature_all_lifetimes(sample, "pT", 10, x_lim=(0,10000))
-        plot_feature_all_lifetimes(sample, "velo", 10)
-        plot_feature_all_lifetimes(sample, "hits", 10)
+        # plot_feature_all_lifetimes(sample, "pT", 10, x_lim=(0,10000))
+        # plot_feature_all_lifetimes(sample, "velo", 10)
+        # plot_feature_all_lifetimes(sample, "hits", 10)
+        for req in track_reqs: 
+            plot_mass_rank_all_lifetimes(sample, req, n_bins=60, x_lim=(0, 6000))
+            plot_mass_rank_all_lifetimes(sample, req, n_bins=60, x_lim=(0, 6000))
 print(f"Saved track stats to {track_stats_plot_path}")
