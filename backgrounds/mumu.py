@@ -18,14 +18,23 @@ import pyLCIO
 from pyLCIO import UTIL, EVENT
 import ROOT
 
+# DEFINING CUTS 
+PT_MIN   = 800.0
+MASS_MIN = 500.0
+BETA_MAX = 0.99
+def pass_pt(t):   return np.isfinite(t["pT"])   and (t["pT"]   > PT_MIN)
+def pass_mass(t): return np.isfinite(t["mass"]) and (t["mass"] > MASS_MIN)
+def pass_beta(t): return np.isfinite(t["beta"]) and (t["beta"] < BETA_MAX)
+def pass_all(t):  return pass_pt(t) and pass_mass(t) and pass_beta(t)
+
 dirs = {"bib": "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mumu_bkg/bib/",
         "nobib": "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mumu_bkg/nobib/"}
 # windows = ["loose", "nominal"]
 # bib_options = ["bib", "nobib"]
 bib_options = ["nobib"]
 windows = ["nominal"]
-CACHE = pathlib.Path("cache/mumu_bkg_stats_nominal_nobib_noeta.pkl")
-plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_tracks_nominal_nobib_noeta.pdf"
+CACHE = pathlib.Path("cache/mumu_bkg_stats_nominal_nobib_byevent.pkl")
+plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_tracks_nominal_nobib_byevent.pdf"
 print(dirs.items())
 n_files = 2500
 Bfield = 3.57
@@ -161,48 +170,22 @@ if (not rebuild) and os.path.exists(CACHE):
 
 if stats is None:
     stats = {
-        window: {
-            req: {
-                "bib": {
-                    "pT": [],
-                    "hits": [],
-                    "velo": [],
-                    "mass": [],
-                    "true_eta": [],
-                    "true_pT": [],
-                    "true_beta": [],
-                    "true_mass": [],
-                    "pT_res": [],
-                    "velo_res": [],
-
-                    "v_fit_err": [],
-                    "full_p": [],
-
-                    "time_span": [],
-                    "radial_span": []
-                },
-                "nobib": {
-                    "pT": [],
-                    "hits": [],
-                    "velo": [],
-                    "mass": [],
-                    "true_eta": [],
-                    "true_pT": [],
-                    "true_mass": [],
-                    "true_beta": [],
-                    "pT_res": [],
-                    "velo_res": [],
-
-                    "v_fit_err": [],
-                    "full_p": [],
-                    
-                    "time_span": [],
-                    "radial_span": []
-                },
-            }
-            for req in track_reqs
-        }
-        for window in windows
+    window: {
+        req: {
+        option: {
+            "n_pass_pt": [], "n_pass_mass": [], "n_pass_beta": [], "n_pass_all": [],
+            "event_has1_pt": [], "event_has2_pt": [],
+            "event_has1_mass": [], "event_has2_mass": [],
+            "event_has1_beta": [], "event_has2_beta": [],
+            "event_has1_all": [], "event_has2_all": [],
+            "leading_mass": [], "subleading_mass": [],
+            "leading_pT": [], "subleading_pT": [],
+            "leading_beta": [], "subleading_beta": [],
+            "leading_hits": [], "subleading_hits": [],
+            "n_events": 0,
+        } for option in bib_options
+        } for req in track_reqs
+    } for window in windows
     }
 
          
@@ -229,7 +212,10 @@ if stats is None:
                     continue
                 reader.open(file_path)
                 for event in reader:
-                    event_masses = []
+                    tracks_by_req = {req: [] for req in track_reqs}
+                    for req in track_reqs:
+                        stats[window][req][option]["n_events"] += 1
+
                     rel_nav = build_rel_nav(event)
                     all_collections = event.getCollectionNames() 
                     mcp_collection = event.getCollection("MCParticle") if "MCParticle" in all_collections else None
@@ -260,9 +246,9 @@ if stats is None:
                                 momentum = mcp.getMomentum()
                                 tlv = ROOT.TLorentzVector()
                                 tlv.SetPxPyPzE(momentum[0], momentum[1], momentum[2], mcp.getEnergy())
-                                # if abs(tlv.Eta()) > 0.8:
-                                #     no_eta_cut += 1
-                                #     continue
+                                if abs(tlv.Eta()) > 0.8:
+                                    no_eta_cut += 1
+                                    continue
                                 true_pT = tlv.Perp()
                                 true_beta = tlv.Beta()
                                 true_velo = true_beta * speedoflight
@@ -376,128 +362,73 @@ if stats is None:
                                     m_reco = reco_p * math.sqrt(1.0/(beta*beta) - 1.0)
                                 else:
                                     m_reco = np.nan
-                                
-                                if np.isfinite(m_reco) and (vb_hits >= 3 and ib_hits >= 2 and ob_hits >= 2):
-                                    event_masses.append(m_reco)
-
-                                if SAVE_TRACK_DISPLAYS and (len(track_displays) < MAX_TRACK_DISPLAYS):
-                                    ok = True
-                                    if DISPLAY_MASS_WINDOW is not None:
-                                        mmin, mmax = DISPLAY_MASS_WINDOW
-                                        ok = np.isfinite(m_reco) and (mmin <= m_reco <= mmax)
-
-                                    if ok and len(track_times) >= 3 and len(track_pos) >= 3 and len(track_xyz) >= 3:
-                                        tt = np.asarray(track_times, dtype=float)
-                                        rr = np.asarray(track_pos, dtype=float)
-                                        ss = np.asarray(spatial_unc, dtype=float)
-
-                                        mfit = np.isfinite(tt) & np.isfinite(rr) & np.isfinite(ss) & (ss > 0)
-                                        tt2, rr2, ss2 = tt[mfit], rr[mfit], ss[mfit]
-                                        mu_flags = np.asarray(hit_is_muon, dtype=object)
-                                        mu2 = mu_flags[mfit].tolist()
-
-                                        b_fit = np.nan
-                                        if np.isfinite(v_fit) and tt2.size >= 2:
-                                            w = 1.0 / (ss2 * ss2)
-                                            b_fit = np.sum(w * (rr2 - v_fit * tt2)) / np.sum(w)
-
-                                        track_displays.append({
-                                            "window": window,
-                                            "option": option,
-                                            "req": "vb",
-                                            "chi2ndf": (chi2/ndf) if (ndf != 0) else np.nan,
-                                            "vb_hits": vb_hits, "ib_hits": ib_hits, "ob_hits": ob_hits,
-                                            "times": tt.tolist(),
-                                            "r": rr.tolist(),
-                                            "xyz": track_xyz,
-                                            "spatial_unc": np.asarray(spatial_unc, dtype=float).tolist(),
-                                            "v_fit": float(v_fit) if np.isfinite(v_fit) else np.nan,
-                                            "v_err": float(v_err) if np.isfinite(v_err) else np.nan,
-                                            "b_fit": float(b_fit) if np.isfinite(b_fit) else np.nan,
-                                            "beta": float(beta) if np.isfinite(beta) else np.nan,
-                                            "pT": float(reco_pT) if np.isfinite(reco_pT) else np.nan,
-                                            "p": float(reco_p) if np.isfinite(reco_p) else np.nan,
-                                            "m_reco": float(m_reco) if np.isfinite(m_reco) else np.nan,
-                                            "true_pT": float(true_pT) if np.isfinite(true_pT) else np.nan,
-                                            "true_beta": float(true_beta) if np.isfinite(true_beta) else np.nan,
-                                            "true_mass": float(true_mass) if np.isfinite(true_mass) else np.nan,
-                                            "true_eta": float(true_eta) if np.isfinite(true_eta) else np.nan,
-
-                                            "reco_t": tt2.tolist(),
-                                            "reco_r": rr2.tolist(),
-                                            "reco_unc": ss2.tolist(),
-
-                                            "sim_t": np.asarray(track_sim_t, dtype=float)[mfit].tolist(),
-                                            "sim_r": np.asarray(track_sim_r, dtype=float)[mfit].tolist(),
-
-                                            "hit_is_muon": mu2,
-                                        })
-
-                                
-                                if len(track_times) > 0:
-                                    time_span = max(track_times) - min(track_times)
-                                    stats[window]["vb"][option]["time_span"].append(time_span)
-                                
-                                if len(track_pos) > 0:
-                                    radial_span = max(track_pos) - min(track_pos)
-                                    stats[window]["vb"][option]["radial_span"].append(radial_span)
-
-                                
+                                 
+                                track_info = {
+                                    "pT": float(reco_pT) if np.isfinite(reco_pT) else np.nan,
+                                    "beta": float(beta) if np.isfinite(beta) else np.nan,
+                                    "mass": float(m_reco) if np.isfinite(m_reco) else np.nan,
+                                    "hits": float(total_hits),
+                                } 
 
                                 if vb_hits >= 3 and ib_hits >= 2 and ob_hits >=2:
-                                    stats[window]["ob"][option]["pT"].append(reco_pT)
-                                    stats[window]["ob"][option]["velo"].append(v_fit)
-                                    stats[window]["ob"][option]["hits"].append(total_hits)
-                                    stats[window]["ob"][option]["mass"].append(m_reco)
-                                
-                                    stats[window]["ob"][option]["true_beta"].append(true_beta)
-                                    stats[window]["ob"][option]["true_pT"].append(true_pT)
-                                    stats[window]["ob"][option]["true_eta"].append(true_eta)
-
-                                    stats[window]["ob"][option]["pT_res"].append(pT_res)
-                                    stats[window]["ob"][option]["velo_res"].append(velo_res)
-                                    stats[window]["ob"][option]["v_fit_err"].append(v_err)
-                                    stats[window]["ob"][option]["full_p"].append(reco_p)
-                                    stats[window]["ob"][option]["true_mass"].append(true_mass)
+                                    tracks_by_req["ob"].append(track_info)
                                 
                                 if vb_hits >= 3 and ib_hits >= 2:
-                                    stats[window]["ib"][option]["pT"].append(reco_pT)
-                                    stats[window]["ib"][option]["velo"].append(v_fit)
-                                    stats[window]["ib"][option]["hits"].append(total_hits)
-                                    stats[window]["ib"][option]["mass"].append(m_reco)
-                                
-                                    stats[window]["ib"][option]["true_beta"].append(true_beta)
-                                    stats[window]["ib"][option]["true_pT"].append(true_pT)
-                                    stats[window]["ib"][option]["true_eta"].append(true_eta)
+                                    tracks_by_req["ib"].append(track_info)
 
-                                    stats[window]["ib"][option]["pT_res"].append(pT_res)
-                                    stats[window]["ib"][option]["velo_res"].append(velo_res)
-                                    stats[window]["ib"][option]["v_fit_err"].append(v_err)
-                                    stats[window]["ib"][option]["true_mass"].append(true_mass)
-                                    stats[window]["ib"][option]["full_p"].append(reco_p)
+                                if vb_hits >= 3: 
+                                    tracks_by_req["vb"].append(track_info)
+                    
+                    for req in track_reqs:
+                        trks = tracks_by_req[req]
 
-                                if vb_hits >= 3:
-                                    stats[window]["vb"][option]["pT"].append(reco_pT)
-                                    stats[window]["vb"][option]["velo"].append(v_fit)
-                                    stats[window]["vb"][option]["hits"].append(total_hits)
-                                    stats[window]["vb"][option]["mass"].append(m_reco)
+                        n_pt   = sum(1 for t in trks if pass_pt(t))
+                        n_mass = sum(1 for t in trks if pass_mass(t))
+                        n_beta = sum(1 for t in trks if pass_beta(t))
+                        n_all  = sum(1 for t in trks if pass_all(t))
 
-                                    stats[window]["vb"][option]["true_beta"].append(true_beta)
-                                    stats[window]["vb"][option]["true_pT"].append(true_pT)
-                                    stats[window]["vb"][option]["true_eta"].append(true_eta)
+                        d = stats[window][req][option]
 
-                                    stats[window]["vb"][option]["pT_res"].append(pT_res)
-                                    stats[window]["vb"][option]["velo_res"].append(velo_res)
-                                    stats[window]["vb"][option]["v_fit_err"].append(v_err)
-                                    stats[window]["vb"][option]["full_p"].append(reco_p)
-                                    stats[window]["vb"][option]["true_mass"].append(true_mass)
-                    if len(event_masses) >= 1:
-                        event_masses.sort(reverse=True)
-                        stats[window]["vb"][option]["leading_mass"].append(event_masses[0])
-                        if len(event_masses) >= 2:
-                            stats[window]["vb"][option]["subleading_mass"].append(event_masses[1])
+                        d["n_pass_pt"].append(n_pt)
+                        d["n_pass_mass"].append(n_mass)
+                        d["n_pass_beta"].append(n_beta)
+                        d["n_pass_all"].append(n_all)
+
+                        d["event_has1_pt"].append(1 if n_pt   >= 1 else 0)
+                        d["event_has2_pt"].append(1 if n_pt   >= 2 else 0)
+                        d["event_has1_mass"].append(1 if n_mass >= 1 else 0)
+                        d["event_has2_mass"].append(1 if n_mass >= 2 else 0)
+                        d["event_has1_beta"].append(1 if n_beta >= 1 else 0)
+                        d["event_has2_beta"].append(1 if n_beta >= 2 else 0)
+                        d["event_has1_all"].append(1 if n_all  >= 1 else 0)
+                        d["event_has2_all"].append(1 if n_all  >= 2 else 0)
+
+                        passing_all = [t for t in trks if pass_all(t)]
+                        passing_all.sort(key=lambda t: t["mass"], reverse=True)
+
+                        if len(passing_all) >= 1:
+                            lead = passing_all[0]
+                            d["leading_mass"].append(lead["mass"])
+                            d["leading_pT"].append(lead["pT"])
+                            d["leading_beta"].append(lead["beta"])
+                            d["leading_hits"].append(lead["hits"])
                         else:
-                            stats[window]["vb"][option]["subleading_mass"].append(float("nan"))
+                            d["leading_mass"].append(float("nan"))
+                            d["leading_pT"].append(float("nan"))
+                            d["leading_beta"].append(float("nan"))
+                            d["leading_hits"].append(float("nan"))
+
+                        if len(passing_all) >= 2:
+                            sub = passing_all[1]
+                            d["subleading_mass"].append(sub["mass"])
+                            d["subleading_pT"].append(sub["pT"])
+                            d["subleading_beta"].append(sub["beta"])
+                            d["subleading_hits"].append(sub["hits"])
+                        else:
+                            d["subleading_mass"].append(float("nan"))
+                            d["subleading_pT"].append(float("nan"))
+                            d["subleading_beta"].append(float("nan"))
+                            d["subleading_hits"].append(float("nan"))
 
 
 
@@ -522,581 +453,161 @@ labels = {"pT": r"$p_T$ [GeV]",
           "velo_res": r"$(v_{reco} - v_{true})/v_{true}$",
           "pT_res": r"$(p_T^{reco} - p_T^{true})/p_T^{true}$"}
 
-def plot_feature(feature, n_bins, x_lim=None):
-    fig, ax = plt.subplots()
-    feature_arr = np.asarray(stats[window]["vb"][option][feature])
-    print(feature, np.min(feature_arr), np.max(feature_arr))
-    if x_lim:
-        mask = (feature_arr >= x_lim[0]) & (feature_arr <= x_lim[1])
-        feature_arr = feature_arr[mask]
-    weights = np.full_like(feature_arr, 100.0/feature_arr.size, dtype=float)
-    ax.hist(feature_arr, bins=n_bins, weights=weights, histtype="step", facecolor="none")
-    ax.set_xlabel(labels[feature], fontsize=20)
-    ax.set_ylabel("Normalized counts", fontsize=20)
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-    if x_lim:
-        ax.set_xlim(x_lim[0], x_lim[1])
+def print_mumu_bkg_summary(stats, windows, bib_options, track_reqs):
+    sep = "-" * 110
 
-    ax.text(
-        0.02, 0.98,
-        "Muon Collider",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=20,
-        fontweight="bold",
-        style="italic",
-    )
-    ax.text(
-        0.02, 0.90,
-        f"muons, {option}, {window}",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=15
-    ) 
-    ax.text(
-        0.02, 0.83,
-        "MuColl_v1",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=15
-    )
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-def plot_pt_vs_hits(pT_lim=(0, 10000), hits_lim=None, pT_bins=20, hits_bins=10):
-    fig, ax = plt.subplots()
-
-    pT = np.asarray(stats[window]["vb"][option]["mass"], dtype=float)
-    hits = np.asarray(stats[window]["vb"][option]["velo_res"], dtype=float)
-
-    m = np.isfinite(pT) & np.isfinite(hits)
-    if pT_lim is not None:
-        m &= (pT >= pT_lim[0]) & (pT <= pT_lim[1])
-    if hits_lim is not None:
-        m &= (hits >= hits_lim[0]) & (hits <= hits_lim[1])
-
-    pT = pT[m]
-    hits = hits[m]
-
-    if pT.size == 0:
-        plt.close(fig)
-        return
-
-    h = ax.hist2d(
-        hits, pT,
-        bins=[hits_bins, pT_bins],
-        range=[hits_lim, pT_lim] if (hits_lim is not None and pT_lim is not None) else None,
-        cmap="viridis",
-    )
-    cb = fig.colorbar(h[3], ax=ax)
-    cb.set_label("Counts", fontsize=14)
-
-    ax.set_xlabel("Velocity resolution", fontsize=20)
-    ax.set_ylabel(r"Mass [GeV]", fontsize=20)
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-
-    ax.text(0.02, 0.98, "Muon Collider", ha="left", va="top",
-            transform=ax.transAxes, fontsize=20, fontweight="bold", style="italic", color="white")
-    ax.text(0.02, 0.90, f"muons, {option}, {window}", ha="left", va="top",
-            transform=ax.transAxes, fontsize=15, color="white")
-    ax.text(0.02, 0.83, "MuColl_v1", ha="left", va="top",
-            transform=ax.transAxes, fontsize=15, color="white")
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-def plot_feature_with_mass_overlay(feature, n_bins,
-                                   x_lim=None,
-                                   m_range=(450.0, 500.0),
-                                   req="vb",
-                                   overlay_label=None):
-    
-
-    d = stats[window][req][option]
-
-    feat = np.asarray(d[feature], dtype=float)
-    mass = np.asarray(d["mass"], dtype=float)
-
-    n = min(feat.size, mass.size)
-    feat = feat[:n]
-    mass = mass[:n]
-
-    base = np.isfinite(feat)
-    if x_lim is not None:
-        base &= (feat >= x_lim[0]) & (feat <= x_lim[1])
-
-    mmin, mmax = m_range
-    sel_mass = base & np.isfinite(mass) & (mass >= mmin) & (mass <= mmax)
-
-    feat_all = feat[base]
-    feat_m   = feat[sel_mass]
-
-    N_all = feat_all.size
-    N_m   = feat_m.size
-
-    fig, ax = plt.subplots()
-
-    if N_all > 0:
-        w_all = np.full_like(feat_all, 100.0 / N_all, dtype=float)
-        ax.hist(feat_all, bins=n_bins, weights=w_all,
-                histtype="step", linewidth=1.5,
-                label="All tracks")
-
-    if N_m > 0:
-        w_m = np.full_like(feat_m, 100.0 / N_m, dtype=float)
-        frac = 100.0 * N_m / N_all
-        lab = overlay_label or f"{mmin:g} < m < {mmax:g} ({frac:.1f}%)"
-        ax.hist(feat_m, bins=n_bins, weights=w_m,
-                histtype="step", linewidth=2.0,
-                label=lab)
-
-    ax.set_xlabel(labels.get(feature, feature), fontsize=20)
-    ax.set_ylabel("Normalized counts", fontsize=20)
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-    if x_lim is not None:
-        ax.set_xlim(x_lim[0], x_lim[1])
-
-    ax.text(0.02, 0.98, "Muon Collider", ha="left", va="top",
-            transform=ax.transAxes, fontsize=20,
-            fontweight="bold", style="italic")
-    ax.text(0.02, 0.90, f"muons, {option}, {window}", ha="left", va="top",
-            transform=ax.transAxes, fontsize=15)
-    ax.text(0.02, 0.83, "MuColl_v1", ha="left", va="top",
-            transform=ax.transAxes, fontsize=15)
-
-    ax.legend(frameon=False, fontsize=12, loc="upper right")
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-    print(f"[overlay] {feature}: N_all={N_all}, N_mass={N_m}, frac={N_m/N_all:.3f}")
-
-def plot_mass_vs_one_minus_beta(req="vb",
-                                m_lim=(0, 1000),
-                                one_minus_beta_lim=(0, 0.02)):
-
-    d = stats[window][req][option]
-
-    mass = np.asarray(d["mass"], dtype=float)
-    velo = np.asarray(d["velo"], dtype=float)
-
-    n = min(mass.size, velo.size)
-    mass = mass[:n]
-    velo = velo[:n]
-
-    beta = velo / speedoflight
-    one_minus_beta = 1.0 - beta
-
-    m = np.isfinite(mass) & np.isfinite(one_minus_beta)
-    m &= (mass >= m_lim[0]) & (mass <= m_lim[1])
-    m &= (one_minus_beta >= one_minus_beta_lim[0]) & (one_minus_beta <= one_minus_beta_lim[1])
-
-    mass = mass[m]
-    one_minus_beta = one_minus_beta[m]
-
-    fig, ax = plt.subplots()
-    ax.scatter(one_minus_beta, mass, s=4, alpha=0.3)
-
-    ax.set_xlabel(r"$1 - \beta$", fontsize=20)
-    ax.set_ylabel(r"$m_{\mathrm{reco}}$ [GeV]", fontsize=20)
-    ax.set_xlim(one_minus_beta_lim)
-    ax.set_ylim(m_lim)
-
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-
-    ax.text(0.02, 0.98, "Muon Collider",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=20, fontweight="bold", style="italic")
-    ax.text(0.02, 0.90, f"{req} tracks, {option}, {window}",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=15)
-    ax.text(0.02, 0.83, "MuColl_v1",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=15)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-    print(f"[m vs 1-beta] plotted {mass.size} points")
-
-def plot_m_over_p_vs_one_minus_beta(req="vb",
-                                    m_over_p_lim=(0, 0.5),
-                                    one_minus_beta_lim=(0, 0.02)):
-    d = stats[window][req][option]
-
-    mass = np.asarray(d["mass"], dtype=float)
-    velo = np.asarray(d["velo"], dtype=float)
-    pT   = np.asarray(d["pT"], dtype=float)
-
-    p = pT
-
-    n = min(mass.size, velo.size, p.size)
-    mass, velo, p = mass[:n], velo[:n], p[:n]
-
-    beta = velo / speedoflight
-    one_minus_beta = 1.0 - beta
-
-    m_over_p = mass / p
-
-    m = np.isfinite(m_over_p) & np.isfinite(one_minus_beta)
-    m &= (m_over_p >= m_over_p_lim[0]) & (m_over_p <= m_over_p_lim[1])
-    m &= (one_minus_beta >= one_minus_beta_lim[0]) & (one_minus_beta <= one_minus_beta_lim[1])
-
-    m_over_p = m_over_p[m]
-    one_minus_beta = one_minus_beta[m]
-
-    fig, ax = plt.subplots()
-    ax.scatter(one_minus_beta, m_over_p, s=4, alpha=0.3)
-    
-    x = np.linspace(one_minus_beta_lim[0], one_minus_beta_lim[1], 400)
-    y = np.sqrt(2.0 * x)
-
-    ax.plot(x, y, color="black", linewidth=2.0,
-            label=r"$\sqrt{2(1-\beta)}$")
-
-
-    ax.set_xlabel(r"$1 - \beta$", fontsize=20)
-    ax.set_ylabel(r"$m_{\mathrm{reco}} / p_{\mathrm{reco}}$", fontsize=20)
-    ax.set_xlim(one_minus_beta_lim)
-    ax.set_ylim(m_over_p_lim)
-
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-
-    ax.text(0.02, 0.98, "Muon Collider",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=20, fontweight="bold", style="italic")
-    ax.text(0.02, 0.90, f"{req} tracks, {option}, {window}",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=15)
-    ax.text(0.02, 0.83, "MuColl_v1",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=15)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-    print(f"[m/p vs 1-beta] plotted {m_over_p.size} points")
-
-def plot_track_display(rec, pdf):
-    times = np.asarray(rec["times"], dtype=float)
-    r = np.asarray(rec["r"], dtype=float)
-    xyz = np.asarray(rec["xyz"], dtype=float) 
-    s_unc = np.asarray(rec["spatial_unc"], dtype=float)
-
-    m = np.isfinite(times) & np.isfinite(r)
-    if xyz.ndim == 2 and xyz.shape[0] == times.size:
-        m &= np.isfinite(xyz).all(axis=1)
-    if s_unc.size == times.size:
-        m &= np.isfinite(s_unc) & (s_unc > 0)
-
-    times, r = times[m], r[m]
-    xyz = xyz[m] if (xyz.ndim == 2 and xyz.shape[0] == m.size) else xyz
-    s_unc = s_unc[m] if (s_unc.size == m.size) else None
-
-    if times.size < 3:
-        return
-
-    order = np.argsort(times)
-    times = times[order]
-    r = r[order]
-    if xyz.ndim == 2 and xyz.shape[0] == times.size:
-        xyz = xyz[order]
-    if s_unc is not None and s_unc.size == times.size:
-        s_unc = s_unc[order]
-
-    fig = plt.figure()
- 
-    ax = fig.add_subplot()
-
-    if s_unc is not None:
-        ax.errorbar(times, r, yerr=s_unc, fmt="o", markersize=3, linewidth=1, alpha=0.8)
-    else:
-        ax.scatter(times, r, s=10, alpha=0.8)
-
-    v_fit = rec.get("v_fit", np.nan)
-    b_fit = rec.get("b_fit", np.nan)
-    if np.isfinite(v_fit) and np.isfinite(b_fit):
-        tline = np.linspace(times.min(), times.max(), 200)
-        rline = v_fit * tline + b_fit
-        ax.plot(tline, rline, linewidth=2)
-
-    ax.set_xlabel("Corrected time [ns]")
-    ax.set_ylabel("r = sqrt(x^2+y^2+z^2) [mm]")
-    ax.set_title("r vs time with velocity fit")
-
-    m_reco = rec.get("m_reco", np.nan)
-    pT = rec.get("pT", np.nan)
-    p = rec.get("p", np.nan)
-    beta = rec.get("beta", np.nan)
-    true_beta = rec.get("true_beta", np.nan)
-    v_err = rec.get("v_err", np.nan)
-
-    vb = rec.get("vb_hits", np.nan)
-    ib = rec.get("ib_hits", np.nan)
-    ob = rec.get("ob_hits", np.nan)
-
-    text = (
-        f"m_reco = {m_reco:.2f} GeV\n"
-        f"pT = {pT:.2f} GeV,  p = {p:.2f} GeV\n"
-        f"beta = {beta:.6f}, {true_beta:.6f} true\n"
-        f"v_fit = {v_fit:.3f} mm/ns  (err {v_err:.3f})\n"
-        f"hits: vb={vb}, ib={ib}, ob={ob}\n"
-        f"{rec.get('option','')} / {rec.get('window','')}"
-    )
-    fig.suptitle(text, fontsize=10)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-def plot_track_rt_display(rec, pdf):
-    reco_t = np.asarray(rec["reco_t"], dtype=float)
-    reco_r = np.asarray(rec["reco_r"], dtype=float)
-    reco_s = np.asarray(rec["reco_unc"], dtype=float)
-
-    sim_t  = np.asarray(rec["sim_t"], dtype=float)
-    sim_r  = np.asarray(rec["sim_r"], dtype=float)
-
-    fig, ax = plt.subplots(figsize=(7.5, 5.5))
-
-    m = np.isfinite(sim_t) & np.isfinite(sim_r)
-
-    mu = np.asarray(rec.get("hit_is_muon", []), dtype=object)
-    if mu.size != reco_t.size:
-        mu = np.ones_like(reco_t, dtype=bool)
-
-    mu_mask = (mu == True)
-    nonmu_mask = (mu == False)
-
-    if np.any(mu_mask):
-        ax.errorbar(
-            reco_t[mu_mask], reco_r[mu_mask], yerr=reco_s[mu_mask],
-            fmt="o", markersize=7,
-            label="Reco hits (muon)",
-            alpha=0.8
-        )
-
-    if np.any(nonmu_mask):
-        ax.errorbar(
-            reco_t[nonmu_mask], reco_r[nonmu_mask], yerr=reco_s[nonmu_mask],
-            fmt="o", markersize=7,
-            label="Reco hits (non-muon)",
-            alpha=0.8
-        )
-
-    if np.any(m):
-        ax.scatter(
-            sim_t[m], sim_r[m],
-            s=50,
-            color="tab:red",
-            marker="x",
-            label="Sim hits"
-        )
-
-    v_fit = rec.get("v_fit", np.nan)
-    b_fit = rec.get("b_fit", np.nan)
-    if np.isfinite(v_fit) and np.isfinite(b_fit):
-        tline = np.linspace(np.min(reco_t), np.max(reco_t), 200)
-        ax.plot(tline, v_fit*tline + b_fit,
-                color="black", linewidth=2,
-                label="Velocity fit")
-
-    ax.set_xlabel("Time [ns]", fontsize=14)
-    ax.set_ylabel(r"$r_{xyz}$ [mm]", fontsize=14)
-
-    ax.legend(frameon=False)
-
-    ax.set_title(
-    f"m_reco = {rec['m_reco']:.1f} GeV   beta = {rec['beta']:.6f}\n"
-    f"track chi2/ndf = {rec['chi2ndf']:.6f}",
-    fontsize=12
-    )
-
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-def plot_mass_logx_variable_bins(req="vb",
-                                 m_range=(1e-1, 5e4),
-                                 n_bins=70,
-                                 normalize=False,
-                                 floor=0.1,
-                                 use_log_bins=True,
-                                 debug=False):
-    d = stats[window][req][option]
-    m0 = np.asarray(d["mass"], dtype=float)
-
-    if m0.size == 0:
-        return
-
-    finite = np.isfinite(m0)
-    m = m0[finite]
-
-    if m.size == 0:
-        return
-
-    if debug:
-        print(f"[mass debug] N total={m0.size}, finite={finite.sum()}, "
-              f"nan/inf={(~finite).sum()}, "
-              f"==0={np.sum(finite & (m0 == 0.0))}, <0={np.sum(finite & (m0 < 0.0))}, "
-              f"min_finite={np.min(m):.6g}")
-
-    m = np.clip(m, floor, None)
-
-    lo, hi = m_range
-    m = m[(m >= lo) & (m <= hi)]
-    if m.size == 0:
-        return
-
-    if use_log_bins:
-        edges = np.logspace(np.log10(lo), np.log10(hi), n_bins + 1)
-    else:
-        edges = np.linspace(lo, hi, n_bins + 1)
-
-    fig, ax = plt.subplots()
-
-    if normalize:
-        weights = np.full_like(m, 100.0 / m.size, dtype=float)
-        ax.hist(m, bins=edges, weights=weights, histtype="step", linewidth=1.8)
-        ax.set_ylabel("Normalized counts [%]", fontsize=20)
-    else:
-        ax.hist(m, bins=edges, histtype="step", linewidth=1.8)
-        ax.set_ylabel("Counts", fontsize=20)
-
-    ax.set_xscale("log")
-    ax.set_xlabel("Reconstructed mass [GeV]", fontsize=20)
-
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-
-    ax.text(0.02, 0.98, "Muon Collider", ha="left", va="top",
-            transform=ax.transAxes, fontsize=20, fontweight="bold", style="italic")
-    ax.text(0.02, 0.90, f"muons, {option}, {window}", ha="left", va="top",
-            transform=ax.transAxes, fontsize=15)
-    ax.text(0.02, 0.83, "MuColl_v1", ha="left", va="top",
-            transform=ax.transAxes, fontsize=15)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-def plot_leading_subleading_masses(leading, subleading, n_bins=60, x_lim=(0, 4500)):
-    fig, ax = plt.subplots()
-
-    lead = np.asarray(leading, dtype=float)
-    sub  = np.asarray(subleading, dtype=float)
-
-    lead = lead[np.isfinite(lead)]
-    sub  = sub[np.isfinite(sub)]
-
-    if x_lim is not None:
-        lead = lead[(lead >= x_lim[0]) & (lead <= x_lim[1])]
-        sub  = sub[(sub >= x_lim[0]) & (sub <= x_lim[1])]
-
-    if lead.size > 0:
-        w = np.full_like(lead, 100.0 / lead.size, dtype=float)
-        ax.hist(lead, bins=n_bins, weights=w,
-                histtype="step", linewidth=2.0,
-                label="Leading mass")
-
-    if sub.size > 0:
-        w = np.full_like(sub, 100.0 / sub.size, dtype=float)
-        ax.hist(sub, bins=n_bins, weights=w,
-                histtype="step", linewidth=2.0,
-                label="Subleading mass")
-
-    ax.set_xlabel("Reconstructed mass [GeV]", fontsize=20)
-    ax.set_ylabel("Normalized counts [%]", fontsize=20)
-    if x_lim is not None:
-        ax.set_xlim(x_lim)
-
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-
-    ax.text(0.02, 0.98, "Muon Collider",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=20, fontweight="bold", style="italic")
-    ax.text(0.02, 0.90, f"muons, {option}, {window}",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=15)
-    ax.text(0.02, 0.83, "MuColl_v1",
-            ha="left", va="top",
-            transform=ax.transAxes,
-            fontsize=15)
-
-    ax.legend(frameon=False, fontsize=12)
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-
-with PdfPages(plot_path) as pdf:
     for window in windows:
         for option in bib_options:
-            pT_bins = 10
-            hit_bins = 10
-            velo_bins = 10
-            plot_feature("velo", 20, x_lim=(290,300))
-            plot_feature("true_pT", 20)
-            plot_feature("true_eta", 20)
-            plot_feature("true_mass", 20)
-            plot_feature("mass", 20, x_lim=(0,4500))
-            plot_pt_vs_hits(pT_lim=(400,600), hits_lim=(-0.5,0.5))
+            print("\n" + sep)
+            print(f"Muon background | window = {window} | option = {option}")
+            print(sep)
 
-            plot_feature("pT_res", 20, x_lim=(-1, 1))
-            plot_feature("velo_res", 20, x_lim=(-0.5, 0.2))
-            plot_feature_with_mass_overlay("velo", 20, x_lim=(290,300), m_range=(400,600), req="vb")
-            plot_feature_with_mass_overlay("pT", 20, x_lim=(0,10000), m_range=(400,600), req="vb")
-            plot_feature_with_mass_overlay("true_eta", 20, x_lim=(-2, 2), m_range=(400,600), req="vb")
-            plot_feature_with_mass_overlay("v_fit_err", 20, x_lim=(0,4), m_range=(400,600), req="ob")
-            plot_feature_with_mass_overlay("full_p", 20, x_lim=(3000,7000), m_range=(400,600), req="ob")
-            plot_feature_with_mass_overlay("time_span", 20, m_range=(400,600), req="vb")
-            plot_feature_with_mass_overlay("radial_span", 20, m_range=(400,600), req="vb")
-            plot_mass_vs_one_minus_beta(
-                req="vb",
-                m_lim=(0, 1000),
-                one_minus_beta_lim=(0, 0.015)
+            header = (
+                "req   N_events | "
+                "PT:   >=1pass/den  >=2pass/den  |   "
+                "   MASS: >=1pass/den  >=2pass/den  |    "
+                "   BETA: >=1pass/den  >=2pass/den  |    "
+                "   ALL:  >=1pass/den  >=2pass/den"
             )
-            plot_m_over_p_vs_one_minus_beta(
-                req="vb",
-                m_over_p_lim=(0, 0.4),
-                one_minus_beta_lim=(0, 0.015)
-            )
-            plot_mass_logx_variable_bins(req="vb",m_range=(0.1, 10e3), n_bins=70, normalize=True)
-            plot_leading_subleading_masses(
-                stats[window]["vb"][option]["leading_mass"],
-                stats[window]["vb"][option]["subleading_mass"],
-                n_bins=60,
-                # x_lim=(0, 1000)
-            )
+            print(header)
+            print(sep)
+
+            for req in track_reqs:
+                d = stats[window][req][option]
+
+                N = d["n_events"]
+                if N == 0:
+                    print(f"{req:>3}   0 events")
+                    continue
+
+                def fmt(n):
+                    return f"{n}/{N} ({100*n/N:5.1f}%)"
+
+                pt1   = sum(d["event_has1_pt"])
+                pt2   = sum(d["event_has2_pt"])
+                m1    = sum(d["event_has1_mass"])
+                m2    = sum(d["event_has2_mass"])
+                b1    = sum(d["event_has1_beta"])
+                b2    = sum(d["event_has2_beta"])
+                a1    = sum(d["event_has1_all"])
+                a2    = sum(d["event_has2_all"])
+
+                print(
+                    f"{req:>3} {N:9d} | "
+                    f"{fmt(pt1):>14} {fmt(pt2):>14} | "
+                    f"{fmt(m1):>14} {fmt(m2):>14} | "
+                    f"{fmt(b1):>14} {fmt(b2):>14} | "
+                    f"{fmt(a1):>14} {fmt(a2):>14}"
+                )
+
+            print(sep)
+            print("Note:")
+            print(" - Denominator = all processed events (background).")
+            print(" - >=1pass : event has at least one track passing the cut.")
+            print(" - >=2pass : event has at least two tracks passing the cut.")
+            print(sep)
+
+print_mumu_bkg_summary(stats, windows, bib_options, track_reqs)
 
 
+def _event_norm_hist(ax, arr, N_events, bins, label):
+    x = np.asarray(arr, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0 or N_events <= 0:
+        return 0.0
+    w = np.full_like(x, 1.0 / N_events, dtype=float)  # sums to fraction of events
+    ax.hist(x, bins=bins, weights=w, histtype="step", linewidth=2, label=label)
+    return x.size / N_events  # fraction of events with a finite value
 
-print(f"Saved plots to {plot_path}") 
+def plot_mumu_leading_subleading_eventnorm(stats, windows, bib_options, track_reqs,
+                                          out_pdf,
+                                          bins_cfg=None,
+                                          xlims_cfg=None,
+                                          tick_major=18,
+                                          tick_minor=16):
+    if bins_cfg is None:
+        bins_cfg = {
+            "pT":   np.linspace(0, 7000, 51),
+            "mass": np.linspace(0, 2000, 61),
+            "beta": np.linspace(0.9, 1.025, 53),
+        }
+    if xlims_cfg is None:
+        xlims_cfg = {
+            "pT": (0, 7000),
+            "mass": (0, 2000),
+            "beta": (0.9, 1.025),
+        }
 
-if SAVE_TRACK_DISPLAYS and len(track_displays) > 0:
-    with PdfPages(TRACK_DISPLAY_PDF) as pdf2:
-        for rec in track_displays:
-            plot_track_rt_display(rec, pdf2)
-    print(f"Saved {len(track_displays)} track displays to {TRACK_DISPLAY_PDF}")
-else:
-    print("No track displays saved.")
+    features = [
+        ("pT",   "leading_pT",   "subleading_pT",   r"$p_T$ [GeV]"),
+        ("mass", "leading_mass", "subleading_mass", r"reco mass [GeV]"),
+        ("beta", "leading_beta", "subleading_beta", r"$\beta$"),
+    ]
+
+    with PdfPages(out_pdf) as pdf:
+        for window in windows:
+            for option in bib_options:
+                for req in track_reqs:
+                    d = stats[window][req][option]
+
+                    # Prefer explicit counter; otherwise infer from array length
+                    N_events = int(d.get("n_events", 0))
+                    if N_events <= 0:
+                        # fallback if you didn't maintain n_events
+                        N_events = len(d.get("event_has1_all", []))
+                    if N_events <= 0:
+                        continue
+
+                    for key, lead_key, sub_key, xlabel in features:
+                        fig, ax = plt.subplots(figsize=(8, 6))
+
+                        frac_lead = _event_norm_hist(
+                            ax, d.get(lead_key, []), N_events, bins_cfg[key],
+                            label="Leading"
+                        )
+                        frac_sub = _event_norm_hist(
+                            ax, d.get(sub_key, []), N_events, bins_cfg[key],
+                            label="Subleading"
+                        )
+
+                        ax.set_xlabel(xlabel, fontsize=20)
+                        ax.set_ylabel("Fraction of events per bin", fontsize=20)
+
+                        ax.tick_params(axis="both", which="major",
+                                       labelsize=tick_major, length=6, width=1.5)
+                        ax.tick_params(axis="both", which="minor",
+                                       labelsize=tick_minor, length=4, width=1.0)
+
+                        if key in xlims_cfg and xlims_cfg[key] is not None:
+                            ax.set_xlim(*xlims_cfg[key])
+
+                        ax.grid(True, alpha=0.2)
+                        ax.legend(frameon=False, fontsize=13, loc="upper right")
+
+                        ax.text(0.02, 0.98, "Muon Collider",
+                                ha="left", va="top", transform=ax.transAxes,
+                                fontsize=20, fontweight="bold", style="italic")
+                        ax.text(0.02, 0.93, f"muons, {option}, {window}, req={req}",
+                                ha="left", va="top", transform=ax.transAxes, fontsize=14)
+                        ax.text(0.02, 0.89, f"N_events={N_events}",
+                                ha="left", va="top", transform=ax.transAxes, fontsize=14)
+
+                        ax.text(0.02, 0.02,
+                                f"Frac(events w/ leading) ~ {frac_lead:.3f}\n"
+                                f"Frac(events w/ subleading) ~ {frac_sub:.3f}",
+                                ha="left", va="bottom", transform=ax.transAxes, fontsize=12)
+
+                        fig.tight_layout()
+                        pdf.savefig(fig)
+                        plt.close(fig)
+
+    print(f"Saved muon event-normalized leading/subleading plots to {out_pdf}")
+
+plot_mumu_leading_subleading_eventnorm(
+    stats=stats,
+    windows=windows,
+    bib_options=bib_options,
+    track_reqs=["ob"],   
+    out_pdf="/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_lead_sublead.pdf",
+    tick_major=20, tick_minor=18
+)

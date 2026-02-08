@@ -18,18 +18,27 @@ import pyLCIO
 from pyLCIO import UTIL, EVENT
 import ROOT
 
+# DEFINING CUTS 
+PT_MIN   = 800.0
+MASS_MIN = 500.0
+BETA_MAX = 0.99
+def pass_pt(t):   return np.isfinite(t["pT"])   and (t["pT"]   > PT_MIN)
+def pass_mass(t): return np.isfinite(t["mass"]) and (t["mass"] > MASS_MIN)
+def pass_beta(t): return np.isfinite(t["beta"]) and (t["beta"] < BETA_MAX)
+def pass_all(t):  return pass_pt(t) and pass_mass(t) and pass_beta(t)
+
 hit_collections = ["VXDBarrelHits", "VXDEndcapHits", "ITBarrelHits", "ITEndcapHits", "OTBarrelHits", "OTEndcapHits"]
 sim_collections = ["VertexBarrelCollection", "VertexEndcapCollection", "InnerTrackerBarrelCollection", "InnerTrackerEndcapCollection", "OuterTrackerBarrel", "OuterTrackerEndcapCollectionConed"]
 rel_collections = ["VXDBarrelHitsRelations", "VXDEndcapHitsRelations", "ITBarrelHitsRelations", "ITEndcapHitsRelations", "OTBarrelHitsRelations", "OTEndcapHitsRelations"]
 
-loose_dir =  "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_timing/loose4/seeding_10GeV/bib"
+loose_dir =  "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_timing/loose4/seeding_10GeV/nobib"
 window_to_dir = {"loose": loose_dir}
 n_files = 2500
 
-CACHE = pathlib.Path("cache/lifetimes-trackstats.pkl") #-nozero
+CACHE = pathlib.Path("cache/sig_by_event.pkl") #-nozero
 
 plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-decaypos-full.pdf"
-track_stats_plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-trackstats.pdf" # -nozero
+track_stats_plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/sig_by_event.pdf" # -nozero
 
 sample_to_mass = {
     "1000": 1.0,
@@ -166,12 +175,28 @@ if efficiencies is None:
         lifetime: {
             sample: {
                 track_req: {
-                    "pT": [],
-                    "hits": [],
-                    "velo": [],
-                    "mass": [],
                     "leading_mass": [],
-                    "subleading_mass": []
+                    "subleading_mass": [],
+                    "leading_pT": [],
+                    "subleading_pT": [],
+                    "leading_beta": [],
+                    "subleading_beta": [],
+                    "leading_hits": [],
+                    "subleading_hits": [],
+
+                    "n_acc_staus": [],          
+                    "has1_acc_stau": [],        
+                    "has2_acc_stau": [],        
+
+                    "n_pass_pt": [],
+                    "n_pass_mass": [],
+                    "n_pass_beta": [],
+                    "n_pass_all": [],
+
+                    "event_has1_pt": [], "event_has2_pt": [],
+                    "event_has1_mass": [], "event_has2_mass": [],
+                    "event_has1_beta": [], "event_has2_beta": [],
+                    "event_has1_all": [], "event_has2_all": [],
                 } for track_req in track_reqs
             } for sample in sample_to_mass.keys()
         } for lifetime in lifetimes
@@ -195,6 +220,9 @@ if efficiencies is None:
                     continue
                 reader.open(file_path)
                 for event in reader:
+                    tracks_by_req = {req: [] for req in track_reqs}
+                    n_acc_staus = 0
+
                     rel_nav = build_rel_nav(event)
                     all_collections = event.getCollectionNames() 
                     mcp_collection = event.getCollection("MCParticle") if "MCParticle" in all_collections else None
@@ -230,9 +258,11 @@ if efficiencies is None:
                         has_track = 0
 
                         if acc and is_stau:
+                            n_acc_staus += 1
                             related_tracks = nav.getRelatedToObjects(mcp)
 
                             for track in related_tracks:
+
                                 track_chi2 = track.getChi2() / track.getNdf()
                                 if track_chi2 > chi2_cut:
                                     continue
@@ -296,39 +326,68 @@ if efficiencies is None:
                                 else:
                                     m_reco = np.nan
 
+                                track_info = {
+                                    "pT": float(reco_pT) if np.isfinite(reco_pT) else np.nan,
+                                    "beta": float(beta) if np.isfinite(beta) else np.nan,
+                                    "mass": float(m_reco) if np.isfinite(m_reco) else np.nan,
+                                }
+
+
                                 if vb_hits >= 3 and ib_hits >= 2 and ob_hits >= 2:
-                                    save_info["ob"]["pT"].append(reco_pT)
-                                    save_info["ob"]["hits"].append(total_hits)
-                                    save_info["ob"]["velo"].append(v_fit)
-                                    save_info["ob"]["mass"].append(m_reco) 
-                                    if np.isfinite(m_reco):
-                                        masses_by_req["ob"].append(float(m_reco))
+                                    tracks_by_req["ob"].append(track_info)
                                 if vb_hits >= 3 and ib_hits >= 2:
-                                    save_info["ib"]["pT"].append(reco_pT)
-                                    save_info["ib"]["hits"].append(total_hits)
-                                    save_info["ib"]["velo"].append(v_fit)
-                                    save_info["ib"]["mass"].append(m_reco) 
-                                    if np.isfinite(m_reco):
-                                        masses_by_req["ib"].append(float(m_reco))
+                                    tracks_by_req["ib"].append(track_info)
                                 if vb_hits >= 3:
-                                    save_info["vb"]["pT"].append(reco_pT)
-                                    save_info["vb"]["hits"].append(total_hits)
-                                    save_info["vb"]["velo"].append(v_fit)
-                                    save_info["vb"]["mass"].append(m_reco) 
-                                    if np.isfinite(m_reco):
-                                        masses_by_req["vb"].append(float(m_reco))
-
+                                    tracks_by_req["vb"].append(track_info)
+                                    
                     for req in track_reqs:
-                        arr = masses_by_req[req]
-                        if len(arr) == 0:
-                            continue  
-                        arr.sort(reverse=True)
+                        trks = tracks_by_req[req]
 
-                        leading = arr[0]
-                        subleading = arr[1] if len(arr) >= 2 else float("nan")  
+                        n_pt   = sum(1 for t in trks if pass_pt(t))
+                        n_mass = sum(1 for t in trks if pass_mass(t))
+                        n_beta = sum(1 for t in trks if pass_beta(t))
+                        n_all  = sum(1 for t in trks if pass_all(t))
+                        passing_all = [t for t in trks if pass_all(t)]
+                        passing_all.sort(key=lambda t: t["mass"], reverse=True)
 
-                        save_info[req]["leading_mass"].append(float(leading))
-                        save_info[req]["subleading_mass"].append(float(subleading))
+                        save_info[req]["n_pass_pt"].append(n_pt)
+                        save_info[req]["n_pass_mass"].append(n_mass)
+                        save_info[req]["n_pass_beta"].append(n_beta)
+                        save_info[req]["n_pass_all"].append(n_all)
+
+                        save_info[req]["event_has1_pt"].append(1 if n_pt   >= 1 else 0)
+                        save_info[req]["event_has2_pt"].append(1 if n_pt   >= 2 else 0)
+                        save_info[req]["event_has1_mass"].append(1 if n_mass >= 1 else 0)
+                        save_info[req]["event_has2_mass"].append(1 if n_mass >= 2 else 0)
+                        save_info[req]["event_has1_beta"].append(1 if n_beta >= 1 else 0)
+                        save_info[req]["event_has2_beta"].append(1 if n_beta >= 2 else 0)
+                        save_info[req]["event_has1_all"].append(1 if n_all  >= 1 else 0)
+                        save_info[req]["event_has2_all"].append(1 if n_all  >= 2 else 0)
+
+                        save_info[req]["n_acc_staus"].append(n_acc_staus)
+                        save_info[req]["has1_acc_stau"].append(1 if n_acc_staus >= 1 else 0)
+                        save_info[req]["has2_acc_stau"].append(1 if n_acc_staus >= 2 else 0)
+
+
+                        if len(passing_all) >= 1:
+                            lead = passing_all[0]
+                            save_info[req]["leading_mass"].append(lead["mass"])
+                            save_info[req]["leading_pT"].append(lead["pT"])
+                            save_info[req]["leading_beta"].append(lead["beta"])
+                        else:
+                            save_info[req]["leading_mass"].append(float("nan"))
+                            save_info[req]["leading_pT"].append(float("nan"))
+                            save_info[req]["leading_beta"].append(float("nan"))
+
+                        if len(passing_all) >= 2:
+                            sub = passing_all[1]
+                            save_info[req]["subleading_mass"].append(sub["mass"])
+                            save_info[req]["subleading_pT"].append(sub["pT"])
+                            save_info[req]["subleading_beta"].append(sub["beta"])
+                        else:
+                            save_info[req]["subleading_mass"].append(float("nan"))
+                            save_info[req]["subleading_pT"].append(float("nan"))
+                            save_info[req]["subleading_beta"].append(float("nan"))
 
     CACHE.parent.mkdir(exist_ok=True)
     with CACHE.open("wb") as f:
@@ -338,406 +397,212 @@ if efficiencies is None:
 
 print(efficiencies.keys())
 
-# def get_eff_and_err(data, which="has_track"):
-#     accepted = np.array(data["accepted"])
-#     k = np.array(data[which])
-
-#     mask = (accepted == 1)
-#     n = mask.sum()
-#     if n == 0:
-#         return float('nan'), float('nan')
-
-#     # Only consider accepted staus
-#     p = k[mask].mean()
-#     e = binom_se(p, n)
-#     return 100 * p, 100 * e
-
-# def rz_efficiency_map(data, r_bins, z_bins):
-#     r = np.array(data["pos_r"])
-#     z = np.array(data["pos_z"])
-#     accepted = np.array(data["accepted"])
-#     has_track = np.array(data["has_track"])
-
-#     mask = (accepted == 1)
-
-#     r_sel = r[mask]
-#     z_sel = z[mask]
-#     t_sel = has_track[mask]
-
-#     N_tot, r_edges, z_edges = np.histogram2d(
-#         r_sel, z_sel,
-#         bins=[r_bins, z_bins]
-#     )
-
-#     N_rec, _, _ = np.histogram2d(
-#         r_sel, z_sel,
-#         bins=[r_bins, z_bins],
-#         weights=t_sel.astype(float)
-#     )
-
-#     with np.errstate(divide="ignore", invalid="ignore"):
-#         eff = np.where(N_tot > 0, N_rec / N_tot, np.nan)
-
-#     return eff, r_edges, z_edges
-
-# def collect_residuals(effs, type, requirement_key, window, option):
-#     # requirement_key in {"vb_hits","ib_hits","ob_hits"}
-#     vals = []
-#     for sample in sample_to_mass.keys():
-#         vals.extend(effs[window][option][sample][type][requirement_key])
-#     return np.array(vals)
-
-
-
-# panels = [
-#     ("vb_hits", "≥3 VB hits"),
-#     ("ib_hits", "≥3 VB & ≥2 IB hits"),
-#     ("ob_hits", "≥3 VB, ≥2 IB, ≥2 OB hits")
-# ]
-
-# panels0 = [
-#     ("ob_tracks", "≥3 VB, ≥2 IB, ≥2 OB hits")
-# ]
-
-# plt.style.use("seaborn-v0_8-colorblind")
-# with PdfPages(plot_path) as pdf:
-#     fig, ax = plt.subplots(figsize=(8,6))
-#     sorted_samples = sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s])
-#     masses = [sample_to_mass[s] for s in sorted_samples]
-#     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-#     color_map = {3: colors[0], 10: colors[1], 30: colors[2]}
-#     for lifetime in lifetimes: 
-#         trackeff_bib, trackerr_bib = [], []
-        
-#         for sample in sorted_samples: 
-#             d_b = efficiencies[lifetime][sample]
-#             # p_b, e_b = get_eff_and_err(d_b, "track")
-#             p_b, e_b = get_eff_and_err(d_b, "has_track")
-#             trackeff_bib.append(p_b); trackerr_bib.append(e_b)
-
-#         ax.errorbar(
-#             masses, trackeff_bib, yerr=trackerr_bib,
-#             linewidth=2, capsize=2, color=color_map[lifetime],
-#             label=f"{lifetime}ns lifetime"
-#         )
-
-#     ax.text(
-#         0.02, 0.20,
-#         "Muon Collider",
-#         ha="left", va="top",
-#         transform=ax.transAxes,
-#         fontsize=24,
-#         fontweight="bold",
-#         style="italic",
-#     )
-#     ax.text(
-#         0.02, 0.13,
-#         "Simulation 10% BIB, $\sqrt{s}$=10 TeV",
-#         ha="left", va="top",
-#         transform=ax.transAxes,
-#         fontsize=18
-#     ) 
-#     ax.text(
-#         0.02, 0.07,
-#         "MuColl_v1",
-#         ha="left", va="top",
-#         transform=ax.transAxes,
-#         fontsize=18
-#     )        
-
-#     ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-#     ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-
-#     ax.set_xlabel("Stau mass [TeV]", fontsize=20)
-#     ax.set_ylabel("Track reconstruction efficiency (%)", fontsize=22)
-#     ax.grid(True, alpha=0.2)
-#     ax.set_ylim(0,100)
-
-#     handles, labels = [], [] 
-#     h,l = ax.get_legend_handles_labels()
-#     handles.extend(h)
-#     labels.extend(l)
-
-#     by_label = OrderedDict(zip(labels, handles))
-#     fig.legend(by_label.values(), by_label.keys(), fontsize=18, ncol=3, handlelength=1, handletextpad=0.3, columnspacing=0.5, loc="upper center",bbox_to_anchor=(0.5, 1.11))
-    
-#     fig.tight_layout()
-#     pdf.savefig(fig, bbox_inches="tight")
-#     plt.close(fig)
-
-
-# print(f"Saved plots to {plot_path}")
-
-
-# rz_plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-rz-eff.pdf"
-# print(np.mean(efficiencies[30]["2500"]["pos_r"]))
-
-# r_bins = np.linspace(0, 6000, 15)     
-# z_bins = np.linspace(-1500, 1500, 15) 
-
-# vb_r = [30, 51, 74, 102]
-# vb_l = 130
-# ve_z = [80, 120, 200, 280]
-# ve_h = [0, 15, 35, 50]
-
-# ib_r = [127, 340, 554]
-# ib_l = [963.2, 963.2, 1384.6]
-# ie_z = [524, 808, 1093, 1377, 1661, 1946, 2190]
-# ie_h = np.arange(100,300, (300-100)/7) 
-
-# ob_r = [819, 1153, 1486]
-# ob_l = 2528.4
-# oe_z = [1310, 1617, 1883, 2190]
-
-# plt.style.use("seaborn-v0_8-colorblind")
-# with PdfPages(rz_plot_path) as pdf:
-#     lifetime_to_plot = 10
-
-#     for sample in sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s]):
-#         mass = sample_to_mass[sample]
-#         data = efficiencies[lifetime_to_plot][sample]
-
-#         eff, r_edges, z_edges = rz_efficiency_map(data, r_bins, z_bins)
-
-#         fig, ax = plt.subplots(figsize=(8, 6))
-
-#         R, Z = np.meshgrid(r_edges, z_edges, indexing="ij")
-#         im = ax.pcolormesh(
-#             Z, R, eff,  
-#             shading="auto"
-#         )
-
-#         cbar = fig.colorbar(im, ax=ax)
-#         cbar.set_label("Track reconstruction efficiency", fontsize=16)
-
-#         ax.set_xlabel("z decay position [mm]", fontsize=18)
-#         ax.set_ylabel("r decay position [mm]", fontsize=18)
-#         ax.set_title(f"m = {mass:.1f} TeV, τ = {lifetime_to_plot} ns",
-#                      fontsize=18)
-
-#         ax.tick_params(axis="both", which="major", labelsize=14, length=6, width=1.5)
-#         ax.grid(True, alpha=0.2)
-
-#         for layer in vb_r:
-#             ax.plot([-vb_l/2, vb_l/2], [layer, layer], color="black")
-#             ax.plot([-vb_l/2, vb_l/2], [layer+2, layer+2], color="black")
-#         for i,layer in enumerate(ib_r):
-#             ax.plot([-ib_l[i]/2, ib_l[i]/2], [layer, layer], color="black", linestyle=":")
-#         for layer in ob_r:
-#             ax.plot([-ob_l/2, ob_l/2], [layer, layer], color="black", linestyle="--")
-
-#         fig.tight_layout()
-#         pdf.savefig(fig, bbox_inches="tight")
-#         plt.close(fig)
-
-# print(f"Saved R–z efficiency plots to {rz_plot_path}")
-
-
-# decay_hist_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-decaydist.pdf"
-# decay_hist_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-decay_r.pdf"
-
-# plt.style.use("seaborn-v0_8-colorblind")
-# with PdfPages(decay_hist_path) as pdf:
-#     sorted_samples = sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s])
-
-#     r_bins = np.linspace(0, 6000, 21)
-
-#     for lifetime in lifetimes:
-#         for sample in sorted_samples:
-#             mass = sample_to_mass[sample]
-#             data = efficiencies[lifetime][sample]
-
-#             r = np.array(data["pos_r"])
-#             accepted = np.array(data["accepted"])
-#             mask = (accepted == 1)
-
-#             r_sel = r[mask]
-
-#             if r_sel.size == 0:
-#                 continue
-
-#             fig, ax = plt.subplots(figsize=(8, 6))
-
-#             ax.hist(
-#                 r_sel,
-#                 bins=r_bins,
-#                 histtype="step",
-#                 linewidth=2
-#             )
-
-#             ax.set_xlabel("Decay radius r [mm]", fontsize=18)
-#             ax.set_ylabel("Number of staus", fontsize=18)
-#             ax.set_title(
-#                 f"Radial decay distribution\nm = {mass:.1f} TeV, τ = {lifetime} ns",
-#                 fontsize=18
-#             )
-
-#             ax.tick_params(axis="both", which="major", labelsize=14, length=6, width=1.5)
-#             ax.grid(True, alpha=0.2)
-
-#             ax.text(
-#                 0.97, 0.95,
-#                 f"N = {r_sel.size}",
-#                 ha="right", va="top",
-#                 transform=ax.transAxes,
-#                 fontsize=14
-#             )
-
-#             fig.tight_layout()
-#             pdf.savefig(fig, bbox_inches="tight")
-#             plt.close(fig)
-
-# print(f"Saved radial decay histograms to {decay_hist_path}")
-
 labels = {"pT": r"$p_T$ [GeV]",
           "hits": "Hits on track",
           "velo": "Velocity [mm/ns]",
           "leading_mass": "Leading reconstructed mass [GeV]",
           "subleading_mass": "Subleading reconstructed mass [GeV]",}
 
-def plot_feature_all_lifetimes(sample, feature, n_bins, x_lim=None):
-    fig, ax = plt.subplots()
+
+def print_cutflow_summary(efficiencies, lifetimes, sample_to_mass, track_reqs=("ob",), use_two_stau_den_for_ge2=True):
+    """
+    Print event-level cutflow counts/efficiencies for each sample (and lifetime),
+    using denominators based on accepted staus per event.
+
+    Assumes for each [lifetime][sample][req] we have arrays:
+      - "n_acc_staus" (0/1/2 per event)  OR ("has1_acc_stau","has2_acc_stau")
+      - "event_has1_pt",   "event_has2_pt"
+      - "event_has1_mass", "event_has2_mass"
+      - "event_has1_beta", "event_has2_beta"
+      - "event_has1_all",  "event_has2_all"
+
+    If use_two_stau_den_for_ge2=True:
+      - >=2-track efficiencies are computed with denominator = events with 2 accepted staus
+      - >=1-track efficiencies are computed with denominator = events with >=1 accepted stau
+    Otherwise:
+      - both >=1 and >=2 efficiencies use denominator = events with >=1 accepted stau
+    """
+    def _safe_div(num, den):
+        return float(num) / float(den) if den > 0 else float("nan")
+
+    def _fmt(num, den):
+        eff = 100.0 * _safe_div(num, den)
+        if den <= 0:
+            return f"{num}/{den} (nan%)"
+        return f"{num}/{den} ({eff:6.2f}%)"
+
+    # stable ordering by mass
+    samples_sorted = sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s])
 
     for lifetime in lifetimes:
-        feature_arr = np.asarray(efficiencies[lifetime][sample][feature])
-        if x_lim:
-            mask = (feature_arr >= x_lim[0]) & (feature_arr <= x_lim[1])
-            feature_arr = feature_arr[mask]
+        print("\n" + "=" * 120)
+        print(f"Cutflow summary | lifetime = {lifetime} ns")
+        print(f"Track-level cuts used in event_has*: pT>{PT_MIN}, mass>{MASS_MIN}, beta<{BETA_MAX}")
+        print("=" * 120)
 
-        if feature_arr.size == 0:
-            continue
+        for req in track_reqs:
+            print("\n" + "-" * 120)
+            print(f"Track requirement group: {req}")
+            print("-" * 120)
+            header = (
+                "mass[TeV]  sample  N_events  N(acc>=1) N(acc=2) | "
+                "PT:  >=1pass /den  >=2pass /den | "
+                "MASS:>=1pass /den  >=2pass /den | "
+                "BETA:>=1pass /den  >=2pass /den | "
+                "ALL: >=1pass /den  >=2pass /den"
+            )
+            print(header)
+            print("-" * 120)
 
-        weights = np.full_like(feature_arr, 100.0/feature_arr.size, dtype=float)
+            for sample in samples_sorted:
+                d = efficiencies[lifetime][sample][req]
 
-        ax.hist(
-            feature_arr,
-            bins=n_bins,
-            weights=weights,
-            histtype="step",
-            linewidth=2,
-            label=f"{lifetime} ns",
-        )
+                if "n_acc_staus" in d:
+                    n_acc = np.asarray(d["n_acc_staus"], dtype=int)
+                    acc1 = (n_acc >= 1)
+                    acc2 = (n_acc >= 2)
+                else:
+                    acc1 = np.asarray(d.get("has1_acc_stau", []), dtype=int) == 1
+                    acc2 = np.asarray(d.get("has2_acc_stau", []), dtype=int) == 1
 
-    ax.set_xlabel(labels[feature], fontsize=20)
-    ax.set_ylabel("Normalized counts", fontsize=20)
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-    if x_lim:
-        ax.set_xlim(x_lim[0], x_lim[1])
+                N_evt = len(acc1)
+                N_acc1 = int(acc1.sum())
+                N_acc2 = int(acc2.sum())
 
-    ax.legend(fontsize=13)
+                den_ge1 = N_acc1
+                den_ge2 = N_acc2 if use_two_stau_den_for_ge2 else N_acc1
 
-    ax.text(
-        0.02, 0.98,
-        "Muon Collider",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=20,
-        fontweight="bold",
-        style="italic",
-    )
-    ax.text(
-        0.02, 0.90,
-        f"Staus, {sample_to_mass[sample]} TeV",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=15
-    )
-    ax.text(
-        0.02, 0.83,
-        "MuColl_v1, No BIB",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=15
-    )
+                def _num(key, mask, default_len):
+                    arr = d.get(key, None)
+                    if arr is None:
+                        return 0
+                    a = np.asarray(arr, dtype=int)
+                    if len(a) != default_len:
+                        raise ValueError(f"Length mismatch for {sample}/{req}/{key}: len={len(a)} expected {default_len}")
+                    return int(a[mask].sum())
 
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
+                n_pt_1   = _num("event_has1_pt",   acc1, N_evt)
+                n_mass_1 = _num("event_has1_mass", acc1, N_evt)
+                n_beta_1 = _num("event_has1_beta", acc1, N_evt)
+                n_all_1  = _num("event_has1_all",  acc1, N_evt)
 
-def plot_mass_rank_all_lifetimes(sample, track_req, n_bins=60, x_lim=None):
-    fig, ax = plt.subplots()
+                mask2 = acc2 if use_two_stau_den_for_ge2 else acc1
+                n_pt_2   = _num("event_has2_pt",   mask2, N_evt)
+                n_mass_2 = _num("event_has2_mass", mask2, N_evt)
+                n_beta_2 = _num("event_has2_beta", mask2, N_evt)
+                n_all_2  = _num("event_has2_all",  mask2, N_evt)
 
-    for lifetime in lifetimes:
-        lead_arr = np.asarray(efficiencies[lifetime][sample][track_req]["leading_mass"], dtype=float)
-        lead_arr = lead_arr[np.isfinite(lead_arr)]
-        sub_lead_arr = np.asarray(efficiencies[lifetime][sample][track_req]["subleading_mass"], dtype=float)
-        sub_lead_arr = sub_lead_arr[np.isfinite(sub_lead_arr)]
+                mtev = sample_to_mass[sample]
 
-        if x_lim is not None:
-            sub_lead_arr = sub_lead_arr[(sub_lead_arr >= x_lim[0]) & (sub_lead_arr <= x_lim[1])]
-            lead_arr = lead_arr[(lead_arr >= x_lim[0]) & (lead_arr <= x_lim[1])]
+                line = (
+                    f"{mtev:7.1f} {sample:>5s} {N_evt:4d} {N_acc1:4d} {N_acc2:4d} | "
+                    f"pT {_fmt(n_pt_1, den_ge1):>16s} {_fmt(n_pt_2, den_ge2):>16s} | "
+                    f"m {_fmt(n_mass_1, den_ge1):>16s} {_fmt(n_mass_2, den_ge2):>16s} | "
+                    f"β {_fmt(n_beta_1, den_ge1):>16s} {_fmt(n_beta_2, den_ge2):>16s} | "
+                    f"ALL {_fmt(n_all_1, den_ge1):>16s} {_fmt(n_all_2, den_ge2):>16s}"
+                )
+                print(line)
 
-        if sub_lead_arr.size == 0:
-            continue
-
-        if lead_arr.size == 0:
-            continue
-
-        lead_weights = np.full_like(lead_arr, 100.0 / lead_arr.size, dtype=float)
-        sub_lead_weights = np.full_like(sub_lead_arr, 100.0 / sub_lead_arr.size, dtype=float)
-
-        ax.hist(
-            lead_arr,
-            bins=n_bins,
-            weights=lead_weights,
-            histtype="step",
-            linewidth=2,
-            label=f"Leading mass",
-        )
-        ax.hist(
-            sub_lead_arr,
-            bins=n_bins-40,
-            weights=sub_lead_weights,
-            histtype="step",
-            linewidth=2,
-            label=f"Sub-leading mass",
-        )
-
-    ax.set_xlabel("Mass [GeV]", fontsize=20)
-    ax.set_ylabel("Normalized counts", fontsize=20)
-    ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-    if x_lim is not None:
-        ax.set_xlim(x_lim[0], x_lim[1])
-
-    ax.legend(fontsize=13)
-
-    ax.text(
-        0.02, 0.98,
-        "Muon Collider",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=20,
-        fontweight="bold",
-        style="italic",
-    )
-    ax.text(
-        0.02, 0.90,
-        f"Staus, {sample_to_mass[sample]} TeV, req={track_req}",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=15
-    )
-    ax.text(
-        0.02, 0.83,
-        "MuColl_v1, No BIB",
-        ha="left", va="top",
-        transform=ax.transAxes,
-        fontsize=15
-    )
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
+        print("\nNote:")
+        print(" - '>=1pass' efficiencies use denominator = events with >=1 accepted stau.")
+        if use_two_stau_den_for_ge2:
+            print(" - '>=2pass' efficiencies use denominator = events with 2 accepted staus (recommended).")
+        else:
+            print(" - '>=2pass' efficiencies use denominator = events with >=1 accepted stau (less strict).")
+        print("=" * 120 + "\n")
 
 
-with PdfPages(track_stats_plot_path) as pdf:
-    for sample in sample_to_mass.keys():
-        # plot_feature_all_lifetimes(sample, "pT", 10, x_lim=(0,10000))
-        # plot_feature_all_lifetimes(sample, "velo", 10)
-        # plot_feature_all_lifetimes(sample, "hits", 10)
-        for req in track_reqs: 
-            plot_mass_rank_all_lifetimes(sample, req, n_bins=60, x_lim=(0, 6000))
-            plot_mass_rank_all_lifetimes(sample, req, n_bins=60, x_lim=(0, 6000))
-print(f"Saved track stats to {track_stats_plot_path}")
+print_cutflow_summary(efficiencies, lifetimes, sample_to_mass, track_reqs=("ob",))
+
+def _event_norm_hist(ax, arr, N_events, bins, label):
+    """Histogram normalized to number of events (not number of entries)."""
+    x = np.asarray(arr, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0 or N_events <= 0:
+        return 0.0
+    w = np.full_like(x, 1.0 / N_events, dtype=float)   # sums to fraction of events
+    ax.hist(x, bins=bins, weights=w, histtype="step", linewidth=2, label=label)
+    return x.size / N_events
+
+def plot_leading_subleading_eventnorm(efficiencies, lifetimes, sample_to_mass, track_reqs,
+                                      out_pdf,
+                                      bins_cfg=None,
+                                      xlims_cfg=None):
+    if bins_cfg is None:
+        bins_cfg = {
+            "pT":   np.linspace(0, 7000, 51),
+            "mass": np.linspace(0, 6000, 61),
+            "beta": np.linspace(0.6, 1.05, 53),
+        }
+    if xlims_cfg is None:
+        xlims_cfg = {
+            "pT": (0, 7000),
+            "mass": (0, 6000),
+            "beta": (0.6, 1.05),
+        }
+
+    features = [
+        ("pT",   "leading_pT",   "subleading_pT",   r"$p_T$ [GeV]"),
+        ("mass", "leading_mass", "subleading_mass", r"reco mass [GeV]"),
+        ("beta", "leading_beta", "subleading_beta", r"$\beta$"),
+    ]
+
+    samples_sorted = sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s])
+
+    with PdfPages(out_pdf) as pdf:
+        for lifetime in lifetimes:
+            for sample in samples_sorted:
+                mtev = sample_to_mass[sample]
+                for req in track_reqs:
+                    d = efficiencies[lifetime][sample][req]
+
+                    N_events = len(d.get("leading_mass", []))
+                    if N_events == 0:
+                        continue
+
+                    for key, lead_key, sub_key, xlabel in features:
+                        fig, ax = plt.subplots(figsize=(8, 6))
+
+                        frac_lead = _event_norm_hist(ax, d.get(lead_key, []), N_events, bins_cfg[key],
+                                                     label="Leading")
+                        frac_sub  = _event_norm_hist(ax, d.get(sub_key, []),  N_events, bins_cfg[key],
+                                                     label="Subleading")
+
+                        ax.set_xlabel(xlabel, fontsize=16)
+                        ax.set_ylabel("Fraction of events per bin", fontsize=16)
+                        ax.legend(frameon=True, loc="upper right", fontsize=14)
+
+                        if key in xlims_cfg:
+                            ax.set_xlim(*xlims_cfg[key])
+
+                        ax.grid(True, alpha=0.2)
+
+                        ax.text(0.02, 0.98, "Muon Collider", ha="left", va="top",
+                                transform=ax.transAxes, fontsize=16, fontweight="bold", style="italic")
+                        ax.text(0.02, 0.94, f"stau sample: {mtev:.1f} TeV, τ={lifetime} ns, req={req}",
+                                ha="left", va="top", transform=ax.transAxes, fontsize=12)
+                        ax.text(0.02, 0.90, f"N_events={N_events}",
+                                ha="left", va="top", transform=ax.transAxes, fontsize=12)
+
+                        ax.text(0.02, 0.02,
+                                f"Frac(events w/ leading) ~ {frac_lead:.3f}\n"
+                                f"Frac(events w/ subleading) ~ {frac_sub:.3f}",
+                                ha="left", va="bottom", transform=ax.transAxes, fontsize=11)
+                        
+                        ax.tick_params(axis="both", which="major", labelsize=16)
+                        ax.tick_params(axis="both", which="minor", labelsize=14)
+
+                        fig.tight_layout()
+                        pdf.savefig(fig)
+                        plt.close(fig)
+
+    print(f"Saved event-normalized leading/subleading plots to {out_pdf}")
+
+plot_leading_subleading_eventnorm(
+    efficiencies=efficiencies,
+    lifetimes=lifetimes,
+    sample_to_mass=sample_to_mass,
+    track_reqs=["ob"],                
+    out_pdf="/scratch/miralittmann/analysis/mira_analysis_code/stau_lead_sublead.pdf",
+)
+
