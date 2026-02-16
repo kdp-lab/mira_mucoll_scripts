@@ -20,8 +20,8 @@ import ROOT
 
 # DEFINING CUTS 
 PT_MIN   = 800.0
-MASS_MIN = 500.0
-BETA_MAX = 0.99
+MASS_MIN = -1.0
+BETA_MAX = 1.2
 def pass_pt(t):   return np.isfinite(t["pT"])   and (t["pT"]   > PT_MIN)
 def pass_mass(t): return np.isfinite(t["mass"]) and (t["mass"] > MASS_MIN)
 def pass_beta(t): return np.isfinite(t["beta"]) and (t["beta"] < BETA_MAX)
@@ -87,6 +87,40 @@ def residual(p, function_type, times, pos, spatial_unc):
     # weighted residuals
     return (function_type(p, times) - pos) / spatial_unc
 
+def fit_rms(p, function_type, times, pos, spatial_unc):
+    x = np.asarray(times, dtype=float)
+    y = np.asarray(pos, dtype=float)
+    s = np.asarray(spatial_unc, dtype=float)
+
+    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(s) & (s > 0)
+    x, y, s = x[m], y[m], s[m]
+    if x.size == 0:
+        return np.nan, np.nan
+
+    yhat = function_type(p, x)
+    r = yhat - y                
+    rms_unw = float(np.sqrt(np.mean(r*r)))
+    rw = r / s                  
+    rms_w = float(np.sqrt(np.mean(rw*rw)))
+    return rms_unw, rms_w
+
+def time_rms_from_fit(v, t, r, time_unc, b=0.0):
+    t = np.asarray(t, float)
+    r = np.asarray(r, float)
+    st = np.asarray(time_unc, float)
+
+    m = np.isfinite(t) & np.isfinite(r) & np.isfinite(st) & (st > 0)
+    t, r, st = t[m], r[m], st[m]
+    if t.size < 3 or (not np.isfinite(v)) or abs(v) < 1e-12:
+        return np.nan, np.nan
+
+    t_pred = (r - b) / v
+    dt = t - t_pred
+
+    rms_t = float(np.sqrt(np.mean(dt * dt)))          
+    rms_pull = float(np.sqrt(np.mean((dt / st) ** 2))) 
+    return rms_t, rms_pull
+
 def reco_velo(function_type, times, pos, spatial_unc):
     x = np.asarray(times, dtype=float)
     y = np.asarray(pos, dtype=float)
@@ -96,7 +130,7 @@ def reco_velo(function_type, times, pos, spatial_unc):
     x, y, s = x[m], y[m], s[m]
 
     if x.size < 3 or np.allclose(x, x.mean()):
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
 
     p0 = np.array([guess_velo, 0.0])
 
@@ -113,10 +147,13 @@ def reco_velo(function_type, times, pos, spatial_unc):
         sigma2 = chi2 / dof
         cov = np.linalg.inv(J.T @ J) * sigma2
         v_err = float(np.sqrt(cov[0, 0]))
+        rms_unw, rms_w = fit_rms(p, function_type, x, y, s)
+
     except Exception:
         v_err = np.nan
+        rms_unw, rms_w = np.nan, np.nan
 
-    return float(p[0]), v_err
+    return float(p[0]), v_err, rms_unw, rms_w
 
 def linearfunc_no_intercept(v, x):
     return v * x
@@ -124,43 +161,48 @@ def residual_no_intercept(v, times, pos, spatial_unc, time_unc):
     vv = float(np.atleast_1d(v)[0])
     s_eff = np.sqrt(np.asarray(spatial_unc, float)**2 + (vv * np.asarray(time_unc, float))**2)
     return (linearfunc_no_intercept(vv, times) - pos) / s_eff
+
 def reco_velo_no_intercept(times, pos, spatial_unc, time_unc):
     x = np.asarray(times, dtype=float)
     y = np.asarray(pos, dtype=float)
-    sr = np.asarray(spatial_unc, dtype=float)
+    s = np.asarray(spatial_unc, dtype=float)
     st = np.asarray(time_unc, dtype=float)
 
-    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(sr) & np.isfinite(st) & (sr > 0) & (st > 0)
-    x, y, sr, st = x[m], y[m], sr[m], st[m]
+    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(s) & (s > 0) & np.isfinite(st) & (st > 0)
+    x, y, s, st = x[m], y[m], s[m], st[m]
 
     if x.size < 3 or np.allclose(x, x.mean()):
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
 
     v0 = np.array([guess_velo])
 
+    def residual0(v, times, pos, spatial_unc):
+        vv = float(np.atleast_1d(v)[0])
+        return (vv * times - pos) / spatial_unc
+
     fit = optimize.least_squares(
-        residual_no_intercept,
+        residual0,
         v0,
-        args=(x, y, sr, st),
+        args=(x, y, s),
         jac="2-point"
     )
 
     v = float(fit.x[0])
 
+    rms_t, rms_pull = time_rms_from_fit(v, x, y, st, b=0.0)
+
     try:
-        s_eff = np.sqrt(sr**2 + (v * st)**2)
+        r = (v * x - y)
         J = fit.jac
         dof = max(1, x.size - 1)
-        chi2 = np.sum(((v * x - y) / s_eff) ** 2)
+        chi2 = np.sum((r / s) ** 2)
         sigma2 = chi2 / dof
         cov = np.linalg.inv(J.T @ J) * sigma2
         v_err = float(np.sqrt(cov[0, 0]))
     except Exception:
         v_err = np.nan
 
-    return v, v_err
-
-
+    return v, v_err, rms_t, rms_pull
 
 stats = None
 if (not rebuild) and os.path.exists(CACHE):
@@ -182,7 +224,13 @@ if stats is None:
             "leading_pT": [], "subleading_pT": [],
             "leading_beta": [], "subleading_beta": [],
             "leading_hits": [], "subleading_hits": [],
+            "leading_d0": [], "subleading_d0": [],
+            "leading_z0": [], "subleading_z0": [],
             "n_events": 0,
+            "leading_vrms_mm": [],
+            "subleading_vrms_mm": [],
+            "leading_vrmsw": [],
+            "subleading_vrmsw": [],
         } for option in bib_options
         } for req in track_reqs
     } for window in windows
@@ -254,6 +302,9 @@ if stats is None:
                                 true_velo = true_beta * speedoflight
                                 true_eta = tlv.Eta()
                                 true_mass = tlv.M()
+                                
+                                d0 = track.getD0()
+                                z0 = track.getZ0()
 
                                 vb_hits = 0
                                 ib_hits = 0
@@ -304,7 +355,6 @@ if stats is None:
                                             is_mu = False
 
 
-
                                     if system in (1,2):
                                         vb_hits += 0.5
                                         spatial_unc.append(0.005)
@@ -337,7 +387,7 @@ if stats is None:
                                     track_times.append(corrected_corrected_t)
                                     track_pos.append(hit_pos)
 
-                                v_fit, v_err = reco_velo_no_intercept(track_times, track_pos, spatial_unc, time_unc) 
+                                v_fit, v_err, rms_uw, rms_w = reco_velo_no_intercept(track_times, track_pos, spatial_unc, time_unc) 
                                 if np.isfinite(v_fit) and v_fit > speedoflight:
                                     super_lum += 1
                                     v_fit = speedoflight
@@ -368,6 +418,10 @@ if stats is None:
                                     "beta": float(beta) if np.isfinite(beta) else np.nan,
                                     "mass": float(m_reco) if np.isfinite(m_reco) else np.nan,
                                     "hits": float(total_hits),
+                                    "d0": float(d0) if np.isfinite(d0) else np.nan,
+                                    "z0": float(z0) if np.isfinite(z0) else np.nan,
+                                    "vrms_mm": float(rms_uw) if np.isfinite(rms_uw) else np.nan,
+                                    "vrmsw":   float(rms_w)   if np.isfinite(rms_w)   else np.nan,
                                 } 
 
                                 if vb_hits >= 3 and ib_hits >= 2 and ob_hits >=2:
@@ -412,11 +466,20 @@ if stats is None:
                             d["leading_pT"].append(lead["pT"])
                             d["leading_beta"].append(lead["beta"])
                             d["leading_hits"].append(lead["hits"])
+                            d["leading_d0"].append(lead["d0"])
+                            d["leading_z0"].append(lead["z0"])
+                            d["leading_vrms_mm"].append(lead["vrms_mm"])
+                            d["leading_vrmsw"].append(lead["vrmsw"])
+
                         else:
                             d["leading_mass"].append(float("nan"))
                             d["leading_pT"].append(float("nan"))
                             d["leading_beta"].append(float("nan"))
                             d["leading_hits"].append(float("nan"))
+                            d["leading_d0"].append(float("nan"))
+                            d["leading_z0"].append(float("nan"))
+                            d["leading_vrms_mm"].append(float("nan"))
+                            d["leading_vrmsw"].append(float("nan"))
 
                         if len(passing_all) >= 2:
                             sub = passing_all[1]
@@ -424,13 +487,19 @@ if stats is None:
                             d["subleading_pT"].append(sub["pT"])
                             d["subleading_beta"].append(sub["beta"])
                             d["subleading_hits"].append(sub["hits"])
+                            d["subleading_d0"].append(sub["d0"])
+                            d["subleading_z0"].append(sub["z0"])
+                            d["subleading_vrms_mm"].append(sub["vrms_mm"])
+                            d["subleading_vrmsw"].append(sub["vrmsw"])
                         else:
                             d["subleading_mass"].append(float("nan"))
                             d["subleading_pT"].append(float("nan"))
                             d["subleading_beta"].append(float("nan"))
                             d["subleading_hits"].append(float("nan"))
-
-
+                            d["subleading_d0"].append(float("nan"))
+                            d["subleading_z0"].append(float("nan"))
+                            d["subleading_vrms_mm"].append(float("nan"))
+                            d["subleading_vrmsw"].append(float("nan"))
 
         print(f"{total_tracks} tracks")
         print(f"{no_eta_cut} tracks didn't pass eta cut")
@@ -451,7 +520,11 @@ labels = {"pT": r"$p_T$ [GeV]",
           "true_mass": "True mass",
           "mass": "Reconstructed mass",
           "velo_res": r"$(v_{reco} - v_{true})/v_{true}$",
-          "pT_res": r"$(p_T^{reco} - p_T^{true})/p_T^{true}$"}
+          "pT_res": r"$(p_T^{reco} - p_T^{true})/p_T^{true}$",
+          "d0": r"D0 impact parameter",
+          "z0": r"Z0 impact parameter",
+          "vrms_mm": r"fit RMS residual [mm]",
+          "vrmsw":   r"fit RMS weighted residual"}
 
 def print_mumu_bkg_summary(stats, windows, bib_options, track_reqs):
     sep = "-" * 110
@@ -509,6 +582,11 @@ def print_mumu_bkg_summary(stats, windows, bib_options, track_reqs):
 
 print_mumu_bkg_summary(stats, windows, bib_options, track_reqs)
 
+arr = np.array(stats["nominal"]["ob"]["nobib"]["leading_vrms_mm"], dtype=float)
+arr = arr[np.isfinite(arr)]
+print("N finite:", arr.size)
+print("min/median/90%/max:", np.min(arr), np.median(arr), np.quantile(arr, 0.90), np.max(arr))
+
 
 def _event_norm_hist(ax, arr, N_events, bins, label):
     x = np.asarray(arr, dtype=float)
@@ -529,19 +607,31 @@ def plot_mumu_leading_subleading_eventnorm(stats, windows, bib_options, track_re
         bins_cfg = {
             "pT":   np.linspace(0, 7000, 51),
             "mass": np.linspace(0, 2000, 61),
-            "beta": np.linspace(0.9, 1.025, 53),
+            "beta": np.linspace(0.9, 1.025, 53), 
+            "d0": np.linspace(-0.01,0.01, 51),
+            "z0": np.linspace(-0.01,0.01, 51),
+            "vrms_mm": np.linspace(0, 0.1, 51),  
+            "vrmsw":   np.linspace(0, 2, 51),
         }
     if xlims_cfg is None:
         xlims_cfg = {
             "pT": (0, 7000),
             "mass": (0, 2000),
             "beta": (0.9, 1.025),
+            "d0": (-0.01, 0.01),
+            "z0": (-0.01, 0.01),
+            "vrms_mm": (0,0.1),
+            "vrmsw": (0,2)
         }
 
     features = [
         ("pT",   "leading_pT",   "subleading_pT",   r"$p_T$ [GeV]"),
         ("mass", "leading_mass", "subleading_mass", r"reco mass [GeV]"),
         ("beta", "leading_beta", "subleading_beta", r"$\beta$"),
+        ("d0", "leading_d0", "subleading_d0", r"D0"),
+        ("z0", "leading_z0", "subleading_z0", r"Z0"),
+        ("vrms_mm", "leading_vrms_mm", "subleading_vrms_mm", r"Velocity fit RMS time residual"),
+        ("vrmsw",   "leading_vrmsw",   "subleading_vrmsw",   r"Velocity fit RMS time weighted residual"),
     ]
 
     with PdfPages(out_pdf) as pdf:
@@ -592,10 +682,10 @@ def plot_mumu_leading_subleading_eventnorm(stats, windows, bib_options, track_re
                         ax.text(0.02, 0.89, f"N_events={N_events}",
                                 ha="left", va="top", transform=ax.transAxes, fontsize=14)
 
-                        ax.text(0.02, 0.02,
+                        ax.text(0.98, 0.02,
                                 f"Frac(events w/ leading) ~ {frac_lead:.3f}\n"
                                 f"Frac(events w/ subleading) ~ {frac_sub:.3f}",
-                                ha="left", va="bottom", transform=ax.transAxes, fontsize=12)
+                                ha="right", va="bottom", transform=ax.transAxes, fontsize=12)
 
                         fig.tight_layout()
                         pdf.savefig(fig)

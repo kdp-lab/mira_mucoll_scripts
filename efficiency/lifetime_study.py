@@ -20,8 +20,9 @@ import ROOT
 
 # DEFINING CUTS 
 PT_MIN   = 800.0
-MASS_MIN = 500.0
-BETA_MAX = 0.99
+MASS_MIN = 0.0
+BETA_MAX = 1
+NO_INTERCEPT = True
 def pass_pt(t):   return np.isfinite(t["pT"])   and (t["pT"]   > PT_MIN)
 def pass_mass(t): return np.isfinite(t["mass"]) and (t["mass"] > MASS_MIN)
 def pass_beta(t): return np.isfinite(t["beta"]) and (t["beta"] < BETA_MAX)
@@ -110,6 +111,41 @@ def residual(p, function_type, times, pos, spatial_unc):
     # weighted residuals
     return (function_type(p, times) - pos) / spatial_unc
 
+def fit_rms(p, function_type, times, pos, spatial_unc):
+    x = np.asarray(times, dtype=float)
+    y = np.asarray(pos, dtype=float)
+    s = np.asarray(spatial_unc, dtype=float)
+
+    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(s) & (s > 0)
+    x, y, s = x[m], y[m], s[m]
+    if x.size == 0:
+        return np.nan, np.nan
+
+    yhat = function_type(p, x)
+    r = yhat - y                
+    rms_unw = float(np.sqrt(np.mean(r*r)))
+    rw = r / s                   
+    rms_w = float(np.sqrt(np.mean(rw*rw)))
+    return rms_unw, rms_w
+
+def time_rms_from_fit(v, t, r, time_unc, b=0.0):
+    t = np.asarray(t, float)
+    r = np.asarray(r, float)
+    st = np.asarray(time_unc, float)
+
+    m = np.isfinite(t) & np.isfinite(r) & np.isfinite(st) & (st > 0)
+    t, r, st = t[m], r[m], st[m]
+    if t.size < 3 or (not np.isfinite(v)) or abs(v) < 1e-12:
+        return np.nan, np.nan
+
+    t_pred = (r - b) / v
+    dt = t - t_pred
+
+    rms_t = float(np.sqrt(np.mean(dt * dt)))          
+    rms_pull = float(np.sqrt(np.mean((dt / st) ** 2))) 
+    return rms_t, rms_pull
+
+
 def reco_velo(function_type, times, pos, spatial_unc):
     x = np.asarray(times, dtype=float)
     y = np.asarray(pos, dtype=float)
@@ -119,7 +155,7 @@ def reco_velo(function_type, times, pos, spatial_unc):
     x, y, s = x[m], y[m], s[m]
 
     if x.size < 3 or np.allclose(x, x.mean()):
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
 
     p0 = np.array([guess_velo, 0.0])
 
@@ -136,10 +172,55 @@ def reco_velo(function_type, times, pos, spatial_unc):
         sigma2 = chi2 / dof
         cov = np.linalg.inv(J.T @ J) * sigma2
         v_err = float(np.sqrt(cov[0, 0]))
+        rms_unw, rms_w = fit_rms(p, function_type, x, y, s)
+    except Exception:
+        v_err = np.nan
+        rms_unw, rms_w = np.nan, np.nan
+
+    return float(p[0]), v_err, rms_unw, rms_w
+
+def reco_velo_no_intercept(times, pos, spatial_unc, time_unc):
+    x = np.asarray(times, dtype=float)
+    y = np.asarray(pos, dtype=float)
+    s = np.asarray(spatial_unc, dtype=float)
+    st = np.asarray(time_unc, dtype=float)
+
+    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(s) & (s > 0) & np.isfinite(st) & (st > 0)
+    x, y, s, st = x[m], y[m], s[m], st[m]
+
+    if x.size < 3 or np.allclose(x, x.mean()):
+        return np.nan, np.nan, np.nan, np.nan
+
+    v0 = np.array([guess_velo])
+
+    def residual0(v, times, pos, spatial_unc):
+        vv = float(np.atleast_1d(v)[0])
+        return (vv * times - pos) / spatial_unc
+
+    fit = optimize.least_squares(
+        residual0,
+        v0,
+        args=(x, y, s),
+        jac="2-point"
+    )
+
+    v = float(fit.x[0])
+
+    rms_t, rms_pull = time_rms_from_fit(v, x, y, st, b=0.0)
+
+    try:
+        r = (v * x - y)
+        J = fit.jac
+        dof = max(1, x.size - 1)
+        chi2 = np.sum((r / s) ** 2)
+        sigma2 = chi2 / dof
+        cov = np.linalg.inv(J.T @ J) * sigma2
+        v_err = float(np.sqrt(cov[0, 0]))
     except Exception:
         v_err = np.nan
 
-    return float(p[0]), v_err
+    return v, v_err, rms_t, rms_pull
+
 
 def build_rel_nav(event):
     nav = {
@@ -183,6 +264,10 @@ if efficiencies is None:
                     "subleading_beta": [],
                     "leading_hits": [],
                     "subleading_hits": [],
+                    "leading_d0": [],
+                    "subleading_d0": [],
+                    "leading_z0": [],
+                    "subleading_z0": [],
 
                     "n_acc_staus": [],          
                     "has1_acc_stau": [],        
@@ -197,6 +282,11 @@ if efficiencies is None:
                     "event_has1_mass": [], "event_has2_mass": [],
                     "event_has1_beta": [], "event_has2_beta": [],
                     "event_has1_all": [], "event_has2_all": [],
+
+                    "leading_vrms_mm": [],
+                    "subleading_vrms_mm": [],
+                    "leading_vrmsw": [],
+                    "subleading_vrmsw": [],
                 } for track_req in track_reqs
             } for sample in sample_to_mass.keys()
         } for lifetime in lifetimes
@@ -278,6 +368,10 @@ if efficiencies is None:
                                 track_times = []
                                 track_pos = []
                                 spatial_unc = []
+                                time_unc = []
+
+                                d0 = track.getD0()
+                                z0 = track.getZ0()
 
                                 for hit in track_hits:
                                     decoder.setValue(int(hit.getCellID0()))
@@ -286,12 +380,15 @@ if efficiencies is None:
                                     if system in (1, 2):
                                         vb_hits += 0.5
                                         spatial_unc.append(0.005)
+                                        time_unc.append(0.03)
                                     elif system in (3, 4):
                                         ib_hits += 1
                                         spatial_unc.append(0.007)
+                                        time_unc.append(0.06)
                                     elif system in (5, 6):
                                         ob_hits += 1
                                         spatial_unc.append(0.007)
+                                        time_unc.append(0.06)
                                 
                                     hit_time = hit.getTime()
                                     x = hit.getPosition()[0]
@@ -305,8 +402,12 @@ if efficiencies is None:
 
                                     track_times.append(corrected_corrected_t)
                                     track_pos.append(hit_pos)
-                                
-                                v_fit, v_err = reco_velo(linearfunc, track_times, track_pos, spatial_unc) 
+
+                                if NO_INTERCEPT:
+                                    v_fit, v_err, rms_uw, rms_w = reco_velo_no_intercept(track_times, track_pos, spatial_unc, time_unc)
+                                else:
+                                    v_fit, v_err, rms_uw, rms_w = reco_velo(linearfunc, track_times, track_pos, spatial_unc, time_unc)
+ 
                                 total_hits = vb_hits + ib_hits + ob_hits
 
                                 try:
@@ -330,6 +431,10 @@ if efficiencies is None:
                                     "pT": float(reco_pT) if np.isfinite(reco_pT) else np.nan,
                                     "beta": float(beta) if np.isfinite(beta) else np.nan,
                                     "mass": float(m_reco) if np.isfinite(m_reco) else np.nan,
+                                    "d0": float(d0) if np.isfinite(d0) else np.nan,
+                                    "z0": float(z0) if np.isfinite(z0) else np.nan,
+                                    "vrms_mm": float(rms_uw) if np.isfinite(rms_uw) else np.nan,
+                                    "vrmsw":   float(rms_w)   if np.isfinite(rms_w)   else np.nan,
                                 }
 
 
@@ -374,20 +479,37 @@ if efficiencies is None:
                             save_info[req]["leading_mass"].append(lead["mass"])
                             save_info[req]["leading_pT"].append(lead["pT"])
                             save_info[req]["leading_beta"].append(lead["beta"])
+                            save_info[req]["leading_d0"].append(lead["d0"])
+                            save_info[req]["leading_z0"].append(lead["z0"])
+                            save_info[req]["leading_vrms_mm"].append(lead["vrms_mm"])
+                            save_info[req]["leading_vrmsw"].append(lead["vrmsw"])
+
                         else:
                             save_info[req]["leading_mass"].append(float("nan"))
                             save_info[req]["leading_pT"].append(float("nan"))
                             save_info[req]["leading_beta"].append(float("nan"))
+                            save_info[req]["leading_d0"].append(float("nan"))
+                            save_info[req]["leading_z0"].append(float("nan"))
+                            save_info[req]["leading_vrms_mm"].append(float("nan"))
+                            save_info[req]["leading_vrmsw"].append(float("nan"))
 
                         if len(passing_all) >= 2:
                             sub = passing_all[1]
                             save_info[req]["subleading_mass"].append(sub["mass"])
                             save_info[req]["subleading_pT"].append(sub["pT"])
                             save_info[req]["subleading_beta"].append(sub["beta"])
+                            save_info[req]["subleading_d0"].append(sub["d0"])
+                            save_info[req]["subleading_z0"].append(sub["z0"])
+                            save_info[req]["subleading_vrms_mm"].append(sub["vrms_mm"])
+                            save_info[req]["subleading_vrmsw"].append(sub["vrmsw"])
                         else:
                             save_info[req]["subleading_mass"].append(float("nan"))
                             save_info[req]["subleading_pT"].append(float("nan"))
                             save_info[req]["subleading_beta"].append(float("nan"))
+                            save_info[req]["subleading_d0"].append(float("nan"))
+                            save_info[req]["subleading_z0"].append(float("nan"))
+                            save_info[req]["subleading_vrms_mm"].append(float("nan"))
+                            save_info[req]["subleading_vrmsw"].append(float("nan"))
 
     CACHE.parent.mkdir(exist_ok=True)
     with CACHE.open("wb") as f:
@@ -401,7 +523,71 @@ labels = {"pT": r"$p_T$ [GeV]",
           "hits": "Hits on track",
           "velo": "Velocity [mm/ns]",
           "leading_mass": "Leading reconstructed mass [GeV]",
-          "subleading_mass": "Subleading reconstructed mass [GeV]",}
+          "subleading_mass": "Subleading reconstructed mass [GeV]",
+          "leading_d0": "Leading D0",
+          "subleading_d0": "Subleading D0",
+          "leading_z0": "Leading Z0",
+          "subleading_z0": "Subleading Z0",
+          }
+
+
+import numpy as np
+
+def summarize_array(arr):
+    a = np.asarray(arr, dtype=float)
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return {
+            "N": 0,
+            "min": np.nan,
+            "median": np.nan,
+            "p90": np.nan,
+            "max": np.nan
+        }
+    return {
+        "N": int(a.size),
+        "min": float(np.min(a)),
+        "median": float(np.median(a)),
+        "p90": float(np.quantile(a, 0.90)),
+        "max": float(np.max(a)),
+    }
+
+def print_stau_vrms_summaries(efficiencies, lifetimes, sample_to_mass, reqs=("ob",)):
+    samples_sorted = sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s])
+
+    for lifetime in lifetimes:
+        print("\n" + "="*120)
+        print(f"STAU RMS summaries | lifetime = {lifetime} ns")
+        print("="*120)
+
+        for req in reqs:
+            print("\n" + "-"*120)
+            print(f"req = {req}")
+            print("-"*120)
+
+            for sample in samples_sorted:
+                mtev = sample_to_mass[sample]
+                d = efficiencies[lifetime][sample][req]
+
+                lead_w = summarize_array(d.get("leading_vrmsw", []))
+                sub_w  = summarize_array(d.get("subleading_vrmsw", []))
+                lead_u = summarize_array(d.get("leading_vrms_mm", []))
+                sub_u  = summarize_array(d.get("subleading_vrms_mm", []))
+
+                print(f"\nSample {sample}  (m = {mtev:.1f} TeV)")
+                print("  Weighted RMS (vrmsw):")
+                print(f"    Leading   N finite: {lead_w['N']}")
+                print(f"    Leading   min/median/90%/max: {lead_w['min']} {lead_w['median']} {lead_w['p90']} {lead_w['max']}")
+                print(f"    Sublead   N finite: {sub_w['N']}")
+                print(f"    Sublead   min/median/90%/max: {sub_w['min']} {sub_w['median']} {sub_w['p90']} {sub_w['max']}")
+
+                print("  Unweighted RMS (vrms_mm) [mm]:")
+                print(f"    Leading   N finite: {lead_u['N']}")
+                print(f"    Leading   min/median/90%/max: {lead_u['min']} {lead_u['median']} {lead_u['p90']} {lead_u['max']}")
+                print(f"    Sublead   N finite: {sub_u['N']}")
+                print(f"    Sublead   min/median/90%/max: {sub_u['min']} {sub_u['median']} {sub_u['p90']} {sub_u['max']}")
+
+print_stau_vrms_summaries(efficiencies, lifetimes, sample_to_mass, reqs=("ob",))
 
 
 def print_cutflow_summary(efficiencies, lifetimes, sample_to_mass, track_reqs=("ob",), use_two_stau_den_for_ge2=True):
@@ -533,18 +719,30 @@ def plot_leading_subleading_eventnorm(efficiencies, lifetimes, sample_to_mass, t
             "pT":   np.linspace(0, 7000, 51),
             "mass": np.linspace(0, 6000, 61),
             "beta": np.linspace(0.6, 1.05, 53),
+            "d0": np.linspace(-0.01, 0.01, 51),
+            "z0": np.linspace(-0.01, 0.01, 51),
+            "vrms_mm": np.linspace(0, 0.1, 51),  
+            "vrmsw":   np.linspace(0, 2, 51),  
         }
     if xlims_cfg is None:
         xlims_cfg = {
             "pT": (0, 7000),
             "mass": (0, 6000),
             "beta": (0.6, 1.05),
+            "d0": (-0.01, 0.01),
+            "z0": (-0.01, 0.01),
+            "vrms_mm": (0, 0.1),
+            "vrmsw":   (0, 2),
         }
 
     features = [
         ("pT",   "leading_pT",   "subleading_pT",   r"$p_T$ [GeV]"),
         ("mass", "leading_mass", "subleading_mass", r"reco mass [GeV]"),
         ("beta", "leading_beta", "subleading_beta", r"$\beta$"),
+        ("d0", "leading_d0", "subleading_d0", r"D0"),
+        ("z0", "leading_z0", "subleading_z0", r"Z0"),
+        ("vrms_mm", "leading_vrms_mm", "subleading_vrms_mm", r"Velocity fit RMS residual"),
+        ("vrmsw",   "leading_vrmsw",   "subleading_vrmsw",   r"Velocity fit RMS weighted residual"),
     ]
 
     samples_sorted = sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s])
