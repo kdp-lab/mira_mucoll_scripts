@@ -17,15 +17,51 @@ import pandas as pd
 import pyLCIO
 from pyLCIO import UTIL, EVENT
 import ROOT
+from array import array
+
+SAVE_EVERY_FILES = 50  
+
+def save_cache_atomic(stats, cache_path):
+    cache_path = pathlib.Path(cache_path)
+    cache_path.parent.mkdir(exist_ok=True)
+    tmp = str(cache_path) + ".tmp"
+    with open(tmp, "wb") as f:
+        pickle.dump(stats, f, protocol=pickle.HIGHEST_PROTOCOL)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, cache_path)
 
 # DEFINING CUTS 
-PT_MIN   = 800.0
-MASS_MIN = -1.0
-BETA_MAX = 1.2
-def pass_pt(t):   return np.isfinite(t["pT"])   and (t["pT"]   > PT_MIN)
-def pass_mass(t): return np.isfinite(t["mass"]) and (t["mass"] > MASS_MIN)
-def pass_beta(t): return np.isfinite(t["beta"]) and (t["beta"] < BETA_MAX)
-def pass_all(t):  return pass_pt(t) and pass_mass(t) and pass_beta(t)
+ETA_MAX     = 0.8
+CHI2NDF_MAX = 3.0
+VRMSW_MAX   = 1.6          
+OB_HITS_MIN = 2
+PT_MAX      = 10_000.0   
+NO_INTERCEPT = True  
+
+def track_eta_from_tanL(tanL):
+    if not np.isfinite(tanL):
+        return np.nan
+    return float(np.arcsinh(tanL))
+
+def pass_ob_req(t):
+    return (t["vb_hits"] >= 3) and (t["ib_hits"] >= 2) and (t["ob_hits"] >= 2)
+
+def pass_track_level(t):
+    return (
+        pass_ob_req(t) and
+        np.isfinite(t["eta"]) and (abs(t["eta"]) < ETA_MAX) and
+        np.isfinite(t["chi2ndf"]) and (t["chi2ndf"] < CHI2NDF_MAX) and
+        np.isfinite(t["vrmsw"]) and (t["vrmsw"] < VRMSW_MAX) and
+        np.isfinite(t["pT"]) and (t["pT"] < PT_MAX) and
+        np.isfinite(t["beta"]) and (0 < t["beta"] < 1) and
+        np.isfinite(t["mass"])
+    )
+
+# sample_cuts = {
+#     1000: {"pT_min" : 100, "mass_min": 950, "mass_max": 1050, "beta_max": 0.973},
+
+# }
 
 dirs = {"bib": "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mumu_bkg/bib/",
         "nobib": "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mumu_bkg/nobib/"}
@@ -36,7 +72,7 @@ windows = ["nominal"]
 CACHE = pathlib.Path("cache/mumu_bkg_stats_nominal_nobib_byevent.pkl")
 plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_tracks_nominal_nobib_byevent.pdf"
 print(dirs.items())
-n_files = 2500
+n_files = 1000000
 Bfield = 3.57
 speedoflight = 299792458/1000000  # mm/ns
 chi2_cut = 3
@@ -212,304 +248,214 @@ if (not rebuild) and os.path.exists(CACHE):
 
 if stats is None:
     stats = {
-    window: {
-        req: {
-        option: {
-            "n_pass_pt": [], "n_pass_mass": [], "n_pass_beta": [], "n_pass_all": [],
-            "event_has1_pt": [], "event_has2_pt": [],
-            "event_has1_mass": [], "event_has2_mass": [],
-            "event_has1_beta": [], "event_has2_beta": [],
-            "event_has1_all": [], "event_has2_all": [],
-            "leading_mass": [], "subleading_mass": [],
-            "leading_pT": [], "subleading_pT": [],
-            "leading_beta": [], "subleading_beta": [],
-            "leading_hits": [], "subleading_hits": [],
-            "leading_d0": [], "subleading_d0": [],
-            "leading_z0": [], "subleading_z0": [],
-            "n_events": 0,
-            "leading_vrms_mm": [],
-            "subleading_vrms_mm": [],
-            "leading_vrmsw": [],
-            "subleading_vrmsw": [],
-        } for option in bib_options
-        } for req in track_reqs
-    } for window in windows
+        "n_events": 0,
+        "last_file": -1,
+
+        "leading_mass":      array("f"),
+        "subleading_mass":   array("f"),
+        "leading_pT":        array("f"),
+        "subleading_pT":     array("f"),
+        "leading_beta":      array("f"),
+        "subleading_beta":   array("f"),
+        "leading_d0":        array("f"),
+        "subleading_d0":     array("f"),
+        "leading_z0":        array("f"),
+        "subleading_z0":     array("f"),
     }
 
+    start_file = int(stats.get("last_file", -1)) + 1
+    print(f"Resuming from file {start_file}")
          
     reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
     
-    for window in windows:
-        total_tracks = 0
-        no_eta_cut = 0
-        super_lum = 0
-        print(f"Analyzing {window} window...")
-        for option in bib_options:
-            print(f"Analyzing {option}...")
-            leading_mass = []
-            sub_leading_mass = []
-            leading_mass_evt = []
-            subleading_mass_evt = []
-            stats[window]["vb"][option]["leading_mass"] = []
-            stats[window]["vb"][option]["subleading_mass"] = []
-            for ifile in tqdm(range(n_files)): 
-                file_name = f"mumu_bkg_reco{ifile}.slcio"
-                file_path = os.path.join(dirs[option], window, file_name)
-                if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                    print(f"couldn't open {file_path}")
+    for ifile in tqdm(range(start_file, n_files)): 
+        file_name = f"mumu_bkg_reco{ifile}.slcio"
+        file_path = os.path.join(dirs["nobib"], "nominal", file_name)
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            print(f"couldn't open {file_path}")
+            continue
+        reader.open(file_path)
+        for event in reader:
+            tracks_by_req = {req: [] for req in track_reqs}
+            all_collections = event.getCollectionNames() 
+            mcp_collection = event.getCollection("MCParticle") if "MCParticle" in all_collections else None
+            track_collection = event.getCollection("SiTracks") if "SiTracks" in all_collections else None 
+            track_relation_collection = event.getCollection("MCParticle_SiTracks") if "MCParticle_SiTracks" in all_collections else None 
+            if not (mcp_collection and track_collection and track_relation_collection):
+                print("issue 1")
+                continue
+            test_hit_coll = event.getCollection("VXDBarrelHits")
+            if test_hit_coll is None:
+                continue
+            encoding = test_hit_coll.getParameters().getStringVal(EVENT.LCIO.CellIDEncoding)
+            decoder = UTIL.BitField64(encoding)
+            nav = UTIL.LCRelationNavigator(track_relation_collection)
+            
+            for itrack, track in enumerate(track_collection):
+                chi2 = track.getChi2()
+                ndf = track.getNdf()
+                if (chi2/ndf) > chi2_cut:
                     continue
-                reader.open(file_path)
-                for event in reader:
-                    tracks_by_req = {req: [] for req in track_reqs}
-                    for req in track_reqs:
-                        stats[window][req][option]["n_events"] += 1
-
-                    rel_nav = build_rel_nav(event)
-                    all_collections = event.getCollectionNames() 
-                    mcp_collection = event.getCollection("MCParticle") if "MCParticle" in all_collections else None
-                    track_collection = event.getCollection("SiTracks") if "SiTracks" in all_collections else None 
-                    track_relation_collection = event.getCollection("MCParticle_SiTracks") if "MCParticle_SiTracks" in all_collections else None 
-                    if not (mcp_collection and track_collection and track_relation_collection):
-                        print("issue 1")
-                        continue
-                    test_hit_coll = event.getCollection("VXDBarrelHits")
-                    if test_hit_coll is None:
-                        continue
-                    encoding = test_hit_coll.getParameters().getStringVal(EVENT.LCIO.CellIDEncoding)
-                    decoder = UTIL.BitField64(encoding)
-                    nav = UTIL.LCRelationNavigator(track_relation_collection)
-                    
-                    for itrack, track in enumerate(track_collection):
-                        total_tracks += 1
-                        chi2 = track.getChi2()
-                        ndf = track.getNdf()
-                        if (chi2/ndf) > chi2_cut:
+                track_mcps = nav.getRelatedFromObjects(track)
+                track_hits = track.getTrackerHits()
+                
+                reco_pT = 0.3 * Bfield / fabs(track.getOmega() * 1000.)
+                if track_mcps:
+                    for mcp in track_mcps:
+                        if abs(mcp.getPDG()) != 13: # just looking at muon tracks 
                             continue
-                        track_mcps = nav.getRelatedFromObjects(track)
-                        track_hits = track.getTrackerHits()
+                        momentum = mcp.getMomentum()
+                        tlv = ROOT.TLorentzVector()
+                        tlv.SetPxPyPzE(momentum[0], momentum[1], momentum[2], mcp.getEnergy())
+                        if abs(tlv.Eta()) > 0.8:
+                            continue
+                        true_pT = tlv.Perp()
+                        true_beta = tlv.Beta()
+                        true_velo = true_beta * speedoflight
+                        true_eta = tlv.Eta()
+                        true_mass = tlv.M()
                         
-                        reco_pT = 0.3 * Bfield / fabs(track.getOmega() * 1000.)
-                        if track_mcps:
-                            for mcp in track_mcps:
-                                momentum = mcp.getMomentum()
-                                tlv = ROOT.TLorentzVector()
-                                tlv.SetPxPyPzE(momentum[0], momentum[1], momentum[2], mcp.getEnergy())
-                                if abs(tlv.Eta()) > 0.8:
-                                    no_eta_cut += 1
-                                    continue
-                                true_pT = tlv.Perp()
-                                true_beta = tlv.Beta()
-                                true_velo = true_beta * speedoflight
-                                true_eta = tlv.Eta()
-                                true_mass = tlv.M()
-                                
-                                d0 = track.getD0()
-                                z0 = track.getZ0()
+                        d0 = track.getD0()
+                        z0 = track.getZ0()
 
-                                vb_hits = 0
-                                ib_hits = 0
-                                ob_hits = 0
-                                
-                                track_times = []
-                                track_pos = []
-                                spatial_unc = []
-                                time_unc = []
-                                track_xyz = []
+                        vb_hits = 0
+                        ib_hits = 0
+                        ob_hits = 0
+                        
+                        track_times = []
+                        track_pos = []
+                        spatial_unc = []
+                        time_unc = []
 
-                                track_sim_r = []
-                                track_sim_t = []
-                                hit_is_muon = [] 
+                        for hit in track_hits:
+                            decoder.setValue(int(hit.getCellID0()))
+                            system = decoder["system"].value()
+                            layer = decoder["layer"].value()
+                            sim_r = np.nan
+                            sim_t = np.nan
 
+                            if system in (1,2):
+                                vb_hits += 0.5
+                                spatial_unc.append(0.005)
+                                time_unc.append(0.03)
+                            elif system in (3,4):
+                                ib_hits += 1
+                                spatial_unc.append(0.007)
+                                time_unc.append(0.06)
+                            elif system in (5,6):
+                                ob_hits += 1
+                                spatial_unc.append(0.007)
+                                time_unc.append(0.06)
 
-                                for hit in track_hits:
-                                    decoder.setValue(int(hit.getCellID0()))
-                                    system = decoder["system"].value()
-                                    layer = decoder["layer"].value()
-                                    sim_r = np.nan
-                                    sim_t = np.nan
+                            hit_time = hit.getTime()
+                            x = hit.getPosition()[0]
+                            y = hit.getPosition()[1]
+                            z = hit.getPosition()[2]
 
-                                    relname = system_to_relname.get(system, None)
-                                    if relname is not None:
-                                        nav_rel = rel_nav[relname]
+                            hit_pos = np.sqrt(x**2 + y**2 + z**2)
+                            tof = hit_pos/speedoflight
 
-                                        simhits = nav_rel.getRelatedToObjects(hit)
+                            resolution = 0.03
+                            if system > 2:
+                                resolution = 0.06
 
-                                        if simhits:
-                                            sh = simhits[0] 
-                                            try:
-                                                mcp = sh.getMCParticle()         
-                                                is_mu = (mcp is not None) and (abs(mcp.getPDG()) == 13)
-                                            except Exception:
-                                                is_mu = False
+                            corrected_t = hit.getTime() - tof
+                            corrected_corrected_t = 2*hit.getTime() - corrected_t
 
-                                            hit_is_muon.append(is_mu)
-                                            sx = sh.getPosition()[0] 
-                                            sy =  sh.getPosition()[1]
-                                            sz =  sh.getPosition()[2]
-                                            sim_r = math.sqrt(sx*sx + sy*sy + sz*sz)
-                                            sim_t = sh.getTime()
+                            track_times.append(corrected_corrected_t)
+                            track_pos.append(hit_pos)
 
-                                            track_sim_r.append(sim_r)
-                                            track_sim_t.append(sim_t)
+                        v_fit, v_err, rms_uw, rms_w = reco_velo_no_intercept(track_times, track_pos, spatial_unc, time_unc) 
+                        if np.isfinite(v_fit) and v_fit > speedoflight:
+                            v_fit = speedoflight
+                        beta = v_fit / speedoflight
 
-                                            is_mu = False
+                        total_hits = vb_hits + ib_hits + ob_hits
+                        pT_res = (reco_pT - true_pT) / true_pT
+                        velo_res = (v_fit - true_velo) / true_velo
 
+                        try:
+                            tanL = track.getTanLambda()
+                        except Exception:
+                            tanL = np.nan
 
-                                    if system in (1,2):
-                                        vb_hits += 0.5
-                                        spatial_unc.append(0.005)
-                                        time_unc.append(0.03)
-                                    elif system in (3,4):
-                                        ib_hits += 1
-                                        spatial_unc.append(0.007)
-                                        time_unc.append(0.06)
-                                    elif system in (5,6):
-                                        ob_hits += 1
-                                        spatial_unc.append(0.007)
-                                        time_unc.append(0.06)
+                        if np.isfinite(tanL):
+                            reco_pz = reco_pT * tanL
+                            reco_p  = math.sqrt(reco_pT**2 + reco_pz**2)
+                        else:
+                            reco_p  = np.nan
+                        
+                        if np.isfinite(reco_p) and np.isfinite(beta) and (0 < beta <= 1):
+                            m_reco = reco_p * math.sqrt(1.0/(beta*beta) - 1.0)
+                        else:
+                            m_reco = np.nan
 
-                                    hit_time = hit.getTime()
-                                    x = hit.getPosition()[0]
-                                    y = hit.getPosition()[1]
-                                    z = hit.getPosition()[2]
-                                    track_xyz.append((x, y, z))
+                        try:
+                            tanL = track.getTanLambda()
+                        except Exception:
+                            tanL = np.nan
+                        eta = float(np.arcsinh(tanL)) if np.isfinite(tanL) else np.nan
 
-                                    hit_pos = np.sqrt(x**2 + y**2 + z**2)
-                                    tof = hit_pos/speedoflight
+                        track_info = {
+                        "pT": float(reco_pT) if np.isfinite(reco_pT) else np.nan,
+                        "beta": float(beta) if np.isfinite(beta) else np.nan,
+                        "mass": float(m_reco) if np.isfinite(m_reco) else np.nan,
+                        "d0": float(d0) if np.isfinite(d0) else np.nan,
+                        "z0": float(z0) if np.isfinite(z0) else np.nan,
+                        "vrmsw": float(rms_w) if np.isfinite(rms_w) else np.nan,
+                        "chi2ndf": float(track.getChi2()/track.getNdf()) if track.getNdf() > 0 else np.nan,
+                        "vb_hits": vb_hits,
+                        "ib_hits": ib_hits,
+                        "ob_hits": ob_hits,
+                        "eta": eta,
+                        } 
 
-                                    resolution = 0.03
-                                    if system > 2:
-                                        resolution = 0.06
+                        if vb_hits >= 3 and ib_hits >= 2 and ob_hits >=2:
+                            tracks_by_req["ob"].append(track_info)
+            
+            trks = tracks_by_req["ob"]
+            passing = [t for t in trks if pass_track_level(t)]
+            passing.sort(key=lambda t: t["pT"], reverse=True)  
 
-                                    corrected_t = hit.getTime() - tof
-                                    corrected_corrected_t = 2*hit.getTime() - corrected_t
+            if len(passing) >= 1:
+                lead = passing[0]
+                stats["leading_pT"].append(lead["pT"])
+                stats["leading_beta"].append(lead["beta"])
+                stats["leading_mass"].append(lead["mass"])
+                stats["leading_d0"].append(lead["d0"])
+                stats["leading_z0"].append(lead["z0"])
+            else:
+                stats["leading_pT"].append(np.nan)
+                stats["leading_beta"].append(np.nan)
+                stats["leading_mass"].append(np.nan)
+                stats["leading_d0"].append(np.nan)
+                stats["leading_z0"].append(np.nan)
 
-                                    track_times.append(corrected_corrected_t)
-                                    track_pos.append(hit_pos)
+            if len(passing) >= 2:
+                sub = passing[1]
+                stats["subleading_pT"].append(sub["pT"])
+                stats["subleading_beta"].append(sub["beta"])
+                stats["subleading_mass"].append(sub["mass"])
+                stats["subleading_d0"].append(sub["d0"])
+                stats["subleading_z0"].append(sub["z0"])
+            else:
+                stats["subleading_pT"].append(np.nan)
+                stats["subleading_beta"].append(np.nan)
+                stats["subleading_mass"].append(np.nan)
+                stats["subleading_d0"].append(np.nan)
+                stats["subleading_z0"].append(np.nan)   
 
-                                v_fit, v_err, rms_uw, rms_w = reco_velo_no_intercept(track_times, track_pos, spatial_unc, time_unc) 
-                                if np.isfinite(v_fit) and v_fit > speedoflight:
-                                    super_lum += 1
-                                    v_fit = speedoflight
-                                beta = v_fit / speedoflight
+            stats["n_events"] += 1 
+        
+        reader.close()
+        stats["last_file"] = ifile
 
-                                total_hits = vb_hits + ib_hits + ob_hits
-                                pT_res = (reco_pT - true_pT) / true_pT
-                                velo_res = (v_fit - true_velo) / true_velo
-
-                                try:
-                                    tanL = track.getTanLambda()
-                                except Exception:
-                                    tanL = np.nan
-
-                                if np.isfinite(tanL):
-                                    reco_pz = reco_pT * tanL
-                                    reco_p  = math.sqrt(reco_pT**2 + reco_pz**2)
-                                else:
-                                    reco_p  = np.nan
-                                
-                                if np.isfinite(reco_p) and np.isfinite(beta) and (0 < beta <= 1):
-                                    m_reco = reco_p * math.sqrt(1.0/(beta*beta) - 1.0)
-                                else:
-                                    m_reco = np.nan
-                                 
-                                track_info = {
-                                    "pT": float(reco_pT) if np.isfinite(reco_pT) else np.nan,
-                                    "beta": float(beta) if np.isfinite(beta) else np.nan,
-                                    "mass": float(m_reco) if np.isfinite(m_reco) else np.nan,
-                                    "hits": float(total_hits),
-                                    "d0": float(d0) if np.isfinite(d0) else np.nan,
-                                    "z0": float(z0) if np.isfinite(z0) else np.nan,
-                                    "vrms_mm": float(rms_uw) if np.isfinite(rms_uw) else np.nan,
-                                    "vrmsw":   float(rms_w)   if np.isfinite(rms_w)   else np.nan,
-                                } 
-
-                                if vb_hits >= 3 and ib_hits >= 2 and ob_hits >=2:
-                                    tracks_by_req["ob"].append(track_info)
-                                
-                                if vb_hits >= 3 and ib_hits >= 2:
-                                    tracks_by_req["ib"].append(track_info)
-
-                                if vb_hits >= 3: 
-                                    tracks_by_req["vb"].append(track_info)
+        if (ifile % SAVE_EVERY_FILES) == 0:
+            save_cache_atomic(stats, CACHE)
+            print(f"[checkpoint] saved at file {ifile}, n_events={stats['n_events']}")
                     
-                    for req in track_reqs:
-                        trks = tracks_by_req[req]
-
-                        n_pt   = sum(1 for t in trks if pass_pt(t))
-                        n_mass = sum(1 for t in trks if pass_mass(t))
-                        n_beta = sum(1 for t in trks if pass_beta(t))
-                        n_all  = sum(1 for t in trks if pass_all(t))
-
-                        d = stats[window][req][option]
-
-                        d["n_pass_pt"].append(n_pt)
-                        d["n_pass_mass"].append(n_mass)
-                        d["n_pass_beta"].append(n_beta)
-                        d["n_pass_all"].append(n_all)
-
-                        d["event_has1_pt"].append(1 if n_pt   >= 1 else 0)
-                        d["event_has2_pt"].append(1 if n_pt   >= 2 else 0)
-                        d["event_has1_mass"].append(1 if n_mass >= 1 else 0)
-                        d["event_has2_mass"].append(1 if n_mass >= 2 else 0)
-                        d["event_has1_beta"].append(1 if n_beta >= 1 else 0)
-                        d["event_has2_beta"].append(1 if n_beta >= 2 else 0)
-                        d["event_has1_all"].append(1 if n_all  >= 1 else 0)
-                        d["event_has2_all"].append(1 if n_all  >= 2 else 0)
-
-                        passing_all = [t for t in trks if pass_all(t)]
-                        passing_all.sort(key=lambda t: t["mass"], reverse=True)
-
-                        if len(passing_all) >= 1:
-                            lead = passing_all[0]
-                            d["leading_mass"].append(lead["mass"])
-                            d["leading_pT"].append(lead["pT"])
-                            d["leading_beta"].append(lead["beta"])
-                            d["leading_hits"].append(lead["hits"])
-                            d["leading_d0"].append(lead["d0"])
-                            d["leading_z0"].append(lead["z0"])
-                            d["leading_vrms_mm"].append(lead["vrms_mm"])
-                            d["leading_vrmsw"].append(lead["vrmsw"])
-
-                        else:
-                            d["leading_mass"].append(float("nan"))
-                            d["leading_pT"].append(float("nan"))
-                            d["leading_beta"].append(float("nan"))
-                            d["leading_hits"].append(float("nan"))
-                            d["leading_d0"].append(float("nan"))
-                            d["leading_z0"].append(float("nan"))
-                            d["leading_vrms_mm"].append(float("nan"))
-                            d["leading_vrmsw"].append(float("nan"))
-
-                        if len(passing_all) >= 2:
-                            sub = passing_all[1]
-                            d["subleading_mass"].append(sub["mass"])
-                            d["subleading_pT"].append(sub["pT"])
-                            d["subleading_beta"].append(sub["beta"])
-                            d["subleading_hits"].append(sub["hits"])
-                            d["subleading_d0"].append(sub["d0"])
-                            d["subleading_z0"].append(sub["z0"])
-                            d["subleading_vrms_mm"].append(sub["vrms_mm"])
-                            d["subleading_vrmsw"].append(sub["vrmsw"])
-                        else:
-                            d["subleading_mass"].append(float("nan"))
-                            d["subleading_pT"].append(float("nan"))
-                            d["subleading_beta"].append(float("nan"))
-                            d["subleading_hits"].append(float("nan"))
-                            d["subleading_d0"].append(float("nan"))
-                            d["subleading_z0"].append(float("nan"))
-                            d["subleading_vrms_mm"].append(float("nan"))
-                            d["subleading_vrmsw"].append(float("nan"))
-
-        print(f"{total_tracks} tracks")
-        print(f"{no_eta_cut} tracks didn't pass eta cut")
-        print(f"{super_lum} tracks with v > c")
-    print(stats)
-    CACHE.parent.mkdir(exist_ok=True)
-    with CACHE.open("wb") as f:
-        pickle.dump(stats, f, protocol=pickle.HIGHEST_PROTOCOL)
-        print(f"Writing cache to {CACHE}")
-    print("Saved cache successfully.")
+    save_cache_atomic(stats, CACHE)
+    print(f"Writing cache to {CACHE}")
 
 labels = {"pT": r"$p_T$ [GeV]",
           "hits": "Hits on track",
@@ -580,12 +526,12 @@ def print_mumu_bkg_summary(stats, windows, bib_options, track_reqs):
             print(" - >=2pass : event has at least two tracks passing the cut.")
             print(sep)
 
-print_mumu_bkg_summary(stats, windows, bib_options, track_reqs)
+# print_mumu_bkg_summary(stats, windows, bib_options, track_reqs)
 
-arr = np.array(stats["nominal"]["ob"]["nobib"]["leading_vrms_mm"], dtype=float)
-arr = arr[np.isfinite(arr)]
-print("N finite:", arr.size)
-print("min/median/90%/max:", np.min(arr), np.median(arr), np.quantile(arr, 0.90), np.max(arr))
+# arr = np.array(stats["nominal"]["ob"]["nobib"]["leading_vrms_mm"], dtype=float)
+# arr = arr[np.isfinite(arr)]
+# print("N finite:", arr.size)
+# print("min/median/90%/max:", np.min(arr), np.median(arr), np.quantile(arr, 0.90), np.max(arr))
 
 
 def _event_norm_hist(ax, arr, N_events, bins, label):
@@ -638,7 +584,7 @@ def plot_mumu_leading_subleading_eventnorm(stats, windows, bib_options, track_re
         for window in windows:
             for option in bib_options:
                 for req in track_reqs:
-                    d = stats[window][req][option]
+                    d = stats
 
                     # Prefer explicit counter; otherwise infer from array length
                     N_events = int(d.get("n_events", 0))
