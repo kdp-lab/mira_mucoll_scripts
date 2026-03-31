@@ -261,6 +261,8 @@ if stats is None:
         "subleading_d0":     array("f"),
         "leading_z0":        array("f"),
         "subleading_z0":     array("f"),
+        "leading_wvrms":     array("f"),
+        "subleading_wvrms":  array("f"),
     }
 
     start_file = int(stats.get("last_file", -1)) + 1
@@ -424,12 +426,14 @@ if stats is None:
                 stats["leading_mass"].append(lead["mass"])
                 stats["leading_d0"].append(lead["d0"])
                 stats["leading_z0"].append(lead["z0"])
+                stats["leading_wvrms"].append(lead["vrmsw"])
             else:
                 stats["leading_pT"].append(np.nan)
                 stats["leading_beta"].append(np.nan)
                 stats["leading_mass"].append(np.nan)
                 stats["leading_d0"].append(np.nan)
                 stats["leading_z0"].append(np.nan)
+                stats["leading_wvrms"].append(np.nan)
 
             if len(passing) >= 2:
                 sub = passing[1]
@@ -438,12 +442,14 @@ if stats is None:
                 stats["subleading_mass"].append(sub["mass"])
                 stats["subleading_d0"].append(sub["d0"])
                 stats["subleading_z0"].append(sub["z0"])
+                stats["subleading_wvrms"].append(sub["vrmsw"])
             else:
                 stats["subleading_pT"].append(np.nan)
                 stats["subleading_beta"].append(np.nan)
                 stats["subleading_mass"].append(np.nan)
                 stats["subleading_d0"].append(np.nan)
-                stats["subleading_z0"].append(np.nan)   
+                stats["subleading_z0"].append(np.nan)
+                stats["subleading_wvrms"].append(np.nan)
 
             stats["n_events"] += 1 
         
