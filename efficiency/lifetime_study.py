@@ -48,13 +48,12 @@ sim_collections = ["VertexBarrelCollection", "VertexEndcapCollection", "InnerTra
 rel_collections = ["VXDBarrelHitsRelations", "VXDEndcapHitsRelations", "ITBarrelHitsRelations", "ITEndcapHitsRelations", "OTBarrelHitsRelations", "OTEndcapHitsRelations"]
 
 loose_dir =  "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_timing/loose4/seeding_10GeV/nobib"
-window_to_dir = {"loose": loose_dir}
 n_files = 2500 
 
-CACHE = pathlib.Path("cache/sig_with_track_level.pkl") #-nozero
+CACHE = pathlib.Path("cache/sig_with_track_level_loose_03_1.pkl") #-nozero
 
 plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/lifetimes-decaypos-full.pdf"
-track_stats_plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/sig_with_track_level.pdf" # -nozero
+track_stats_plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/sig_with_track_level_medium.pdf" # -nozero
 
 sample_to_mass = {
     "1000": 1.0,
@@ -67,8 +66,8 @@ sample_to_mass = {
     "4500": 4.5
 }
 mass_list = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
-# lifetimes = [3, 10, 30]
-lifetimes = [30]
+lifetimes = ["03", "1"]
+# lifetimes = [10]
 
 stau_ids = {1000015, -1000015, 2000015, -2000015} 
 Bfield = 3.57
@@ -270,7 +269,6 @@ if efficiencies is None:
     efficiencies = {
         lifetime: {
             sample: {
-                    "n_events": [],
                     "leading_mass": [],
                     "subleading_mass": [],
                     "leading_pT": [],
@@ -282,7 +280,9 @@ if efficiencies is None:
                     "leading_z0": [],
                     "subleading_z0": [],   
                     "leading_vrmsw": [],
-                    "subleading_vrmsw": [] 
+                    "subleading_vrmsw": [],
+                    "stau1_tproper_ns": [],
+                    "stau2_tproper_ns": [], 
             } for sample in sample_to_mass.keys()
         } for lifetime in lifetimes
     } 
@@ -326,6 +326,7 @@ if efficiencies is None:
 
                     nav = UTIL.LCRelationNavigator(track_relation_collection)
                     masses_by_req = {req: [] for req in track_reqs}
+                    event_stau_tproper = []
 
                     for mcp in mcp_collection:
                         pdg = mcp.getPDG()
@@ -334,12 +335,40 @@ if efficiencies is None:
                         if not is_stau:
                             continue
 
-                        vx = mcp.getVertex()
-                        ep = mcp.getEndpoint()
+                        # vx = mcp.getVertex()
+                        # ep = mcp.getEndpoint()
 
-                        r_decay = np.sqrt(ep[0]**2 + ep[1]**2)
-                        z_decay = ep[2]
+                        # r_decay = np.sqrt(ep[0]**2 + ep[1]**2)
+                        # z_decay = ep[2]
 
+                        vx = mcp.getVertex()[0]
+                        vy = mcp.getVertex()[1]
+                        vz = mcp.getVertex()[2]
+                        ex = mcp.getEndpoint()[0]
+                        ey = mcp.getEndpoint()[1]
+                        ez = mcp.getEndpoint()[2]
+
+                        dx = ex - vx
+                        dy = ey - vy
+                        dz = ez - vz
+                        L_lab = np.sqrt(dx*dx + dy*dy + dz*dz)  # mm
+
+                        px = mcp.getMomentum()[0]
+                        py = mcp.getMomentum()[1]
+                        pz = mcp.getMomentum()[2]
+                        p = np.sqrt(px*px + py*py + pz*pz)
+                        E = mcp.getEnergy()
+
+                        m2 = max(E*E - p*p, 0.0)
+                        m = np.sqrt(m2)
+
+                        if m > 0 and p > 0:
+                            beta_gamma = p / m
+                            tproper_ns = L_lab / (beta_gamma * speedoflight)
+                        else:
+                            tproper_ns = np.nan
+
+                        event_stau_tproper.append(tproper_ns)
 
 
                         related_tracks = nav.getRelatedToObjects(mcp)
@@ -448,9 +477,19 @@ if efficiencies is None:
                     trks = tracks_by_req["ob"]
                     passing = [t for t in trks if pass_track_level(t)]
                     passing.sort(key=lambda t: t["pT"], reverse=True)  
-                    
-                    save_info["n_events"] += 1
 
+                    finite_t = [x for x in event_stau_tproper if np.isfinite(x)]
+
+                    if len(finite_t) >= 2:
+                        save_info["stau1_tproper_ns"].append(finite_t[0])
+                        save_info["stau2_tproper_ns"].append(finite_t[1])
+                    elif len(finite_t) == 1:
+                        save_info["stau1_tproper_ns"].append(finite_t[0])
+                        save_info["stau2_tproper_ns"].append(np.nan)
+                    else:
+                        save_info["stau1_tproper_ns"].append(np.nan)
+                        save_info["stau2_tproper_ns"].append(np.nan)
+                    
                     if len(passing) >= 1:
                         lead = passing[0]
                         save_info["leading_pT"].append(lead["pT"])
@@ -524,7 +563,7 @@ def summarize_array(arr):
         "max": float(np.max(a)),
     }
 
-def print_stau_vrms_summaries(efficiencies, lifetimes, sample_to_mass, reqs=("ob",)):
+def print_stau_vrms_summaries(efficiencies, lifetimes, sample_to_mass):
     samples_sorted = sorted(sample_to_mass.keys(), key=lambda s: sample_to_mass[s])
 
     for lifetime in lifetimes:
@@ -532,34 +571,22 @@ def print_stau_vrms_summaries(efficiencies, lifetimes, sample_to_mass, reqs=("ob
         print(f"STAU RMS summaries | lifetime = {lifetime} ns")
         print("="*120)
 
-        for req in reqs:
-            print("\n" + "-"*120)
-            print(f"req = {req}")
-            print("-"*120)
+        for sample in samples_sorted:
+            mtev = sample_to_mass[sample]
+            d = efficiencies[lifetime][sample]
 
-            for sample in samples_sorted:
-                mtev = sample_to_mass[sample]
-                d = efficiencies[lifetime][sample][req]
+            lead_w = summarize_array(d.get("leading_vrmsw", []))
+            sub_w  = summarize_array(d.get("subleading_vrmsw", []))
 
-                lead_w = summarize_array(d.get("leading_vrmsw", []))
-                sub_w  = summarize_array(d.get("subleading_vrmsw", []))
-                lead_u = summarize_array(d.get("leading_vrms_mm", []))
-                sub_u  = summarize_array(d.get("subleading_vrms_mm", []))
+            print(f"\nSample {sample}  (m = {mtev:.1f} TeV)")
+            print("  Weighted RMS (vrmsw):")
+            print(f"    Leading   N finite: {lead_w['N']}")
+            print(f"    Leading   min/median/90%/max: {lead_w['min']} {lead_w['median']} {lead_w['p90']} {lead_w['max']}")
+            print(f"    Sublead   N finite: {sub_w['N']}")
+            print(f"    Sublead   min/median/90%/max: {sub_w['min']} {sub_w['median']} {sub_w['p90']} {sub_w['max']}")
 
-                print(f"\nSample {sample}  (m = {mtev:.1f} TeV)")
-                print("  Weighted RMS (vrmsw):")
-                print(f"    Leading   N finite: {lead_w['N']}")
-                print(f"    Leading   min/median/90%/max: {lead_w['min']} {lead_w['median']} {lead_w['p90']} {lead_w['max']}")
-                print(f"    Sublead   N finite: {sub_w['N']}")
-                print(f"    Sublead   min/median/90%/max: {sub_w['min']} {sub_w['median']} {sub_w['p90']} {sub_w['max']}")
 
-                print("  Unweighted RMS (vrms_mm) [mm]:")
-                print(f"    Leading   N finite: {lead_u['N']}")
-                print(f"    Leading   min/median/90%/max: {lead_u['min']} {lead_u['median']} {lead_u['p90']} {lead_u['max']}")
-                print(f"    Sublead   N finite: {sub_u['N']}")
-                print(f"    Sublead   min/median/90%/max: {sub_u['min']} {sub_u['median']} {sub_u['p90']} {sub_u['max']}")
-
-# print_stau_vrms_summaries(efficiencies, lifetimes, sample_to_mass, reqs=("ob",))
+print_stau_vrms_summaries(efficiencies, lifetimes, sample_to_mass)
 
 
 def print_cutflow_summary(efficiencies, lifetimes, sample_to_mass, track_reqs=("ob",), use_two_stau_den_for_ge2=True):

@@ -69,7 +69,7 @@ dirs = {"bib": "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/mumu
 # bib_options = ["bib", "nobib"]
 bib_options = ["nobib"]
 windows = ["nominal"]
-CACHE = pathlib.Path("cache/mumu_bkg_stats_nominal_nobib_byevent.pkl")
+CACHE = pathlib.Path("cache/mumu_bkg_stats_nominal_nobib_cutflow.pkl")
 plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_tracks_nominal_nobib_byevent.pdf"
 print(dirs.items())
 n_files = 1000000
@@ -114,6 +114,79 @@ system_to_relname = {
 guess_velo = 299.8
 
 track_reqs = ["vb", "ib", "ob"]
+
+TRACK_CUTFLOW_STEPS = [
+    ("eta",   r"$|\eta| < 0.8$"),
+    ("chi2",  r"$\chi^2/\mathrm{n.d.f.} < 3$"),
+    ("hits",  r"$\geq 3$ VB, $\geq 2$ IB, $\geq 2$ OB"),
+    ("pt",    r"$p_T < 10~\mathrm{TeV}$"),
+    ("vrmsw", r"$w_{\mathrm{RMS}} < 1.6$"),
+]
+
+def print_track_cutflow_summary(stats):
+    cf = stats["track_cutflow"]
+    total = cf["total_muon_tracks"]
+
+    print("\n" + "="*95)
+    print("TRACK-LEVEL MUON CUTFLOW")
+    print("="*95)
+
+    if total == 0:
+        print("No muon tracks found.")
+        print("="*95)
+        return
+
+    print(f"Total reconstructed muon tracks considered: {total}\n")
+    print(f"{'Cut':<35} {'Individual pass':>20} {'Cumulative pass':>20}")
+    print("-"*95)
+
+    for key, label in TRACK_CUTFLOW_STEPS:
+        n_ind = cf["individual"][key]
+        n_cum = cf["cumulative"][key]
+
+        ind_str = f"{n_ind}/{total} ({100.0*n_ind/total:6.2f}%)"
+        cum_str = f"{n_cum}/{total} ({100.0*n_cum/total:6.2f}%)"
+
+        print(f"{label:<35} {ind_str:>20} {cum_str:>20}")
+
+    print("-"*95)
+    print("Individual pass = fraction of total muon tracks passing that cut alone.")
+    print("Cumulative pass = fraction of total muon tracks surviving up to that stage.")
+    print("="*95)
+
+def init_track_cutflow():
+    return {
+        "total_muon_tracks": 0,
+
+        # pass each cut on its own, with denominator = total muon tracks
+        "individual": OrderedDict((key, 0) for key, _ in TRACK_CUTFLOW_STEPS),
+
+        # cumulative cutflow in the listed order
+        "cumulative": OrderedDict((key, 0) for key, _ in TRACK_CUTFLOW_STEPS),
+    }
+
+def update_track_cutflow(cf, track_info):
+    cf["total_muon_tracks"] += 1
+
+    passes = OrderedDict([
+        ("eta",   np.isfinite(track_info["eta"]) and (abs(track_info["eta"]) < ETA_MAX)),
+        ("chi2",  np.isfinite(track_info["chi2ndf"]) and (track_info["chi2ndf"] < CHI2NDF_MAX)),
+        ("hits",  (track_info["vb_hits"] >= 3) and (track_info["ib_hits"] >= 2) and (track_info["ob_hits"] >= 2)),
+        ("pt",    np.isfinite(track_info["pT"]) and (track_info["pT"] < PT_MAX)),
+        ("vrmsw", np.isfinite(track_info["vrmsw"]) and (track_info["vrmsw"] < VRMSW_MAX)),
+    ])
+
+    # individual
+    for key, passed in passes.items():
+        if passed:
+            cf["individual"][key] += 1
+
+    # cumulative
+    still_alive = True
+    for key, passed in passes.items():
+        still_alive = still_alive and passed
+        if still_alive:
+            cf["cumulative"][key] += 1
 
 def linearfunc(p, x):
     # p[0] = velocity [mm/ns], p[1] = intercept [mm]
@@ -251,6 +324,8 @@ if stats is None:
         "n_events": 0,
         "last_file": -1,
 
+        "track_cutflow": init_track_cutflow(),
+
         "leading_mass":      array("f"),
         "subleading_mass":   array("f"),
         "leading_pT":        array("f"),
@@ -296,8 +371,8 @@ if stats is None:
             for itrack, track in enumerate(track_collection):
                 chi2 = track.getChi2()
                 ndf = track.getNdf()
-                if (chi2/ndf) > chi2_cut:
-                    continue
+                # if (chi2/ndf) > chi2_cut:
+                #     continue
                 track_mcps = nav.getRelatedFromObjects(track)
                 track_hits = track.getTrackerHits()
                 
@@ -309,8 +384,8 @@ if stats is None:
                         momentum = mcp.getMomentum()
                         tlv = ROOT.TLorentzVector()
                         tlv.SetPxPyPzE(momentum[0], momentum[1], momentum[2], mcp.getEnergy())
-                        if abs(tlv.Eta()) > 0.8:
-                            continue
+                        # if abs(tlv.Eta()) > 0.8:
+                        #     continue
                         true_pT = tlv.Perp()
                         true_beta = tlv.Beta()
                         true_velo = true_beta * speedoflight
@@ -411,8 +486,11 @@ if stats is None:
                         "ob_hits": ob_hits,
                         "eta": eta,
                         } 
+                        update_track_cutflow(stats["track_cutflow"], track_info)
 
-                        if vb_hits >= 3 and ib_hits >= 2 and ob_hits >=2:
+                        # if vb_hits >= 3 and ib_hits >= 2 and ob_hits >=2:
+                        #     tracks_by_req["ob"].append(track_info)
+                        if pass_track_level(track_info):
                             tracks_by_req["ob"].append(track_info)
             
             trks = tracks_by_req["ob"]
@@ -462,6 +540,7 @@ if stats is None:
                     
     save_cache_atomic(stats, CACHE)
     print(f"Writing cache to {CACHE}")
+    print_track_cutflow_summary(stats)
 
 labels = {"pT": r"$p_T$ [GeV]",
           "hits": "Hits on track",
@@ -652,4 +731,65 @@ plot_mumu_leading_subleading_eventnorm(
     track_reqs=["ob"],   
     out_pdf="/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/mumu_lead_sublead.pdf",
     tick_major=20, tick_minor=18
+)
+
+def plot_muon_track_cutflow(stats, out_pdf="muon_track_cutflow.pdf"):
+    cf = stats["track_cutflow"]
+    total = int(cf["total_muon_tracks"])
+
+    loose = [3499110, 551402, 549865, 113591, 113544, 6]
+    medium = [2278715, 315934, 314930, 65408, 65389, 78]
+    tight = [1070336, 165640, 165191, 27081, 27076, 857]
+
+    loose_arr = np.array(loose, dtype=float)
+    medium_arr = np.array(medium, dtype=float)
+    tight_arr = np.array(tight, dtype=float)
+
+    cut_labels = [
+        "Total",
+        r"$|\eta| \leq 0.8$",
+        r"$\chi^2/\mathrm{ndf} < 3$",
+        "Hit req",
+        r"$p_T < 10$TeV",
+        r"W.RMS $< 1.6$",
+    ]
+
+    surviving = [
+        total,
+        int(cf["cumulative"]["eta"]),
+        int(cf["cumulative"]["chi2"]),
+        int(cf["cumulative"]["hits"]),
+        int(cf["cumulative"]["pt"]),
+        int(cf["cumulative"]["vrmsw"]),
+    ]
+
+    x = np.arange(len(cut_labels))
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.plot(x, tight,  marker='o', linewidth=3, label='BIB (nominal)')
+    ax.plot(x, medium, marker='o', linewidth=3, label='BIB (medium)')
+    ax.plot(x, loose,  marker='o', linewidth=3, label='BIB (loose)')
+
+    ax.plot(x, surviving, marker="o", linewidth=3, label="Muons (nominal)")
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels(cut_labels, rotation=15, ha="right", fontsize=20)
+    ax.tick_params(axis="y", labelsize=16)
+
+    ax.set_ylabel("Surviving tracks", fontsize=22)
+    ax.set_title("Background Track-Level Cutflow", fontsize=26)
+
+    ax.grid(True, which="both", linestyle="--", alpha=0.35)
+    ax.legend(fontsize=16, frameon=True, loc="lower left")
+
+    fig.tight_layout()
+    fig.savefig(out_pdf)
+    plt.close(fig)
+
+    print(f"Saved cutflow plot to {out_pdf}")
+
+plot_muon_track_cutflow(
+    stats,
+    out_pdf="/scratch/miralittmann/analysis/mira_analysis_code/backgrounds/muon_track_cutflow.pdf"
 )
