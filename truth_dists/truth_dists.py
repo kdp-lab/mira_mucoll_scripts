@@ -23,17 +23,19 @@ parser.add_argument("--rebuild", action="store_true")
 args = parser.parse_args()
 rebuild = args.rebuild 
 
-dir = "/ospool/uc-shared/project/futurecolliders/miralittmann/MAIA/reco/nominal/nobib"
+dir = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/seeding_10GeV/nobib/tight"
 n_files = 2500
-plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/truth_dists_maia.pdf"
+plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/truth_dists.pdf"
 stau_ids = {1000015, -1000015, 2000015, -2000015} 
 sample_to_mass = {
     "1000_10": 1.0,
-    # "2500_10": 2.5,
-    # "3000_10": 3.0,
-    # "3500_10": 3.5,
-    # "4000_10": 4.0,
-    # "4500_10": 4.5
+    "1500_10": 1.5,
+    "2000_10": 2.0,
+    "2500_10": 2.5,
+    "3000_10": 3.0,
+    "3500_10": 3.5,
+    "4000_10": 4.0,
+    "4500_10": 4.5
 }
 speedoflight = 299792458/1000000  # mm/ns
 truths = None
@@ -99,7 +101,7 @@ if truths is None:
 with PdfPages(plot_path) as pdf:
     plt.style.use("seaborn-v0_8-colorblind")
     
-    def common_edges(arrays, nbins=50):
+    def common_edges(arrays, nbins=30):
         data = np.concatenate([np.asarray(a, float) for a in arrays if len(a)>0])
         lo = np.nanmin(data); hi = np.nanmax(data)
         if not np.isfinite(lo) or not np.isfinite(hi) or lo == hi:
@@ -143,7 +145,7 @@ with PdfPages(plot_path) as pdf:
     field, xlabel = "eta", r"$\eta$"
     fig, ax = plt.subplots(figsize=(8,6))
 
-    edges = common_edges([truths[s][field] for s in sample_to_mass], nbins=50) 
+    edges = common_edges([truths[s][field] for s in sample_to_mass], nbins=30) 
 
     for sample in sample_to_mass:
         data = np.asarray(truths[sample][field], float)
@@ -163,28 +165,28 @@ with PdfPages(plot_path) as pdf:
     ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
     plt.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
-    # for field, xlabel in [
-    #     ("betagamma", r"Average $\beta\gamma$"),
-    #     ("velocity",  r"Average velocity [mm/ns]"),
-    #     ("beta", r"Average $\beta$")
-    # ]:       
-    #     fig, ax = plt.subplots(figsize=(8,6))
-    #     masses = [1, 2.5, 3, 3.5, 4, 4.5]
-    #     all_masses = []
-    #     for sample in sample_to_mass.keys():
-    #         data = np.asarray(truths[sample][field])
-    #         avg_data = np.mean(data)
-    #         all_masses.append(avg_data)
+    for field, xlabel in [
+        ("betagamma", r"Average $\beta\gamma$"),
+        ("velocity",  r"Average velocity [mm/ns]"),
+        ("beta", r"Average $\beta$")
+    ]:       
+        fig, ax = plt.subplots(figsize=(8,6))
+        masses = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
+        all_masses = []
+        for sample in sample_to_mass.keys():
+            data = np.asarray(truths[sample][field])
+            avg_data = np.mean(data)
+            all_masses.append(avg_data)
 
-    #     ax.plot(masses,all_masses, linewidth=4, marker="o", markersize=10, markerfacecolor="none")
-    #     ax.set_xlabel("Stau mass [TeV]", fontsize=20)
-    #     ax.set_ylabel(xlabel, fontsize=20)
+        ax.plot(masses,all_masses, linewidth=4, marker="o", markersize=10, markerfacecolor="none")
+        ax.set_xlabel("Stau mass [TeV]", fontsize=20)
+        ax.set_ylabel(xlabel, fontsize=20)
 
-    #     ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-    #     ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0) 
+        ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+        ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0) 
         
-    #     plt.tight_layout()
-    #     pdf.savefig(fig)
-    #     plt.close(fig)
+        plt.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
 
 print(f"saved plots to {plot_path}") 

@@ -9,7 +9,7 @@ import uproot
 from matplotlib.backends.backend_pdf import PdfPages
 
 cb = plt.colormaps['tab10'].colors
-occ_conv = True
+occ_conv = False
 to_percent = True
 poisson = False
 
@@ -45,9 +45,9 @@ def get_occupancy(root_file):
     else:
         return edges, bin_contents
 
-bin_edges,loose_4tev = get_occupancy("/scratch/miralittmann/analysis/mira_analysis_code/loose4tev.root")
-bin_edges,nominal = get_occupancy("/scratch/miralittmann/analysis/mira_analysis_code/tight_occ_aug5.root")
-bin_edges,p26_p5_6 = get_occupancy("/scratch/miralittmann/analysis/mira_analysis_code/p26_p5_p6.root")
+bin_edges,loose_4tev = get_occupancy("/scratch/miralittmann/analysis/mira_analysis_code/occupancy/loose4tev.root")
+bin_edges,nominal = get_occupancy("/scratch/miralittmann/analysis/mira_analysis_code/occupancy/tight_occ_aug5.root")
+bin_edges,p26_p5_6 = get_occupancy("/scratch/miralittmann/analysis/mira_analysis_code/occupancy/p26_p5_p6.root")
 print(np.mean(p26_p5_6[41:51]/nominal[41:51])-1)
 print(p26_p5_6[41], nominal[41])
 print(np.mean(loose_4tev[41:51]/nominal[41:51])-1)
@@ -57,7 +57,10 @@ LABEL_FONTSIZE = 20
 TICK_FONTSIZE  = 16      
 NOTE_FONTSIZE  = 14  
 
-pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/bib_occupancy_9-25.pdf"
+Y_VERT  = 0.40  
+Y_HORIZ = 0.45
+
+pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/bib_hitscm2_9-25.pdf"
 with PdfPages(pdf_path) as pdf:
     plt.style.use("seaborn-v0_8-colorblind")
     fig,ax = plt.subplots(figsize=(8,6))
@@ -66,33 +69,39 @@ with PdfPages(pdf_path) as pdf:
     ax.hist(bin_edges, bins=bin_edges, weights=loose_4tev, histtype="step", label="Loose", linewidth=2, alpha=0.8)
     ax.axvline(8, color="black", ls=":")
 
-    ax.text(4, 5e-3, "VXD Barrel", fontsize=NOTE_FONTSIZE, rotation=90,
+    ax.text(4, 0.35, "VXD Barrel", fontsize=NOTE_FONTSIZE, rotation=90,
         ha="center", va="center", weight="bold",
-        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7))
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7), 
+        transform=ax.get_xaxis_transform(), clip_on=False)
 
     ax.axvline(24, color="black", ls=":")
-    ax.text(16.5, 8e-3, "VXD Disks", fontsize=NOTE_FONTSIZE, rotation=0,
+    ax.text(16.5, 0.40, "VXD Disks", fontsize=NOTE_FONTSIZE, rotation=0,
         ha="center", va="center", weight="bold",
-        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7))
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7),
+        transform=ax.get_xaxis_transform(), clip_on=False)
 
     ax.axvline(27, color="black", ls=":")
-    ax.text(25.5, 5e-3, "IT Barrel", fontsize=NOTE_FONTSIZE, rotation=90,
+    ax.text(25.5, 0.35, "IT Barrel", fontsize=NOTE_FONTSIZE, rotation=90,
         ha="center", va="center", weight="bold",
-        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7))
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7), 
+        transform=ax.get_xaxis_transform(), clip_on=False)
 
     ax.axvline(41, color="black", ls=":")
-    ax.text(34, 8e-3, "IT Disks", fontsize=NOTE_FONTSIZE, rotation=0,
+    ax.text(34, 0.60, "IT Disks", fontsize=NOTE_FONTSIZE, rotation=0,
         ha="center", va="center", weight="bold",
-        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7))
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7), 
+        transform=ax.get_xaxis_transform(), clip_on=False)
 
     ax.axvline(44, color="black", ls=":")
-    ax.text(42.5, 5e-3, "OT Barrel", fontsize=NOTE_FONTSIZE, rotation=90,
+    ax.text(42.5, 0.55, "OT Barrel", fontsize=NOTE_FONTSIZE, rotation=90,
         ha="center", va="center", weight="bold",
-        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7))
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7), 
+        transform=ax.get_xaxis_transform(), clip_on=False)
 
-    ax.text(49, 8e-3, "OT Disks", fontsize=NOTE_FONTSIZE, rotation=0,
+    ax.text(49, 0.60, "OT Disks", fontsize=NOTE_FONTSIZE, rotation=0,
         ha="center", va="center", weight="bold",
-        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7))
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7),
+        transform=ax.get_xaxis_transform(), clip_on=False)
 
     #plt.title("weighted nhits")
     ax.tick_params(axis="both", which="major", labelsize=TICK_FONTSIZE, width=1.2, length=6)
@@ -104,6 +113,35 @@ with PdfPages(pdf_path) as pdf:
         ax.set_ylabel("Average number of hits / cm$^2$", fontsize=LABEL_FONTSIZE, labelpad=4)
     ax.legend(loc="upper right", fontsize=14, frameon=True, framealpha=1, edgecolor="black") 
     ax.set_yscale("log")
+
+
+    ax.text(
+        0.02, 0.16,
+        "Muon Collider",
+        ha="left", va="top",
+        transform=ax.transAxes,
+        fontsize=20,
+        fontweight="bold",
+        style="italic",
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7)
+    )
+    ax.text(
+        0.02, 0.10,
+        r"Simulation 100% BIB, $\sqrt{s}=10\ \mathrm{TeV}$",
+        ha="left", va="top",
+        transform=ax.transAxes,
+        fontsize=16,
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7)
+    ) 
+    ax.text(
+        0.02, 0.05,
+        "MuColl_v1",
+        ha="left", va="top",
+        transform=ax.transAxes,
+        fontsize=16,
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.7)
+    )
+
     plt.tight_layout()
     pdf.savefig(fig)
     plt.close()

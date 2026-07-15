@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
-pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/mucoll_tracker.pdf"
+pdf_path = "/scratch/miralittmann/analysis/mira_analysis_code/mucoll_tracker.pdf
 
 
 vb_r = [30, 51, 74, 102]

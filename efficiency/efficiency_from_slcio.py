@@ -22,28 +22,30 @@ hit_collections = ["VXDBarrelHits", "VXDEndcapHits", "ITBarrelHits", "ITEndcapHi
 sim_collections = ["VertexBarrelCollection", "VertexEndcapCollection", "InnerTrackerBarrelCollection", "InnerTrackerEndcapCollection", "OuterTrackerBarrel", "OuterTrackerEndcapCollectionConed"]
 rel_collections = ["VXDBarrelHitsRelations", "VXDEndcapHitsRelations", "ITBarrelHitsRelations", "ITEndcapHitsRelations", "OTBarrelHitsRelations", "OTEndcapHitsRelations"]
 
-tight_dir = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/seeding_10GeV/refit"
-medium_dir = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_timing/p26_p5_p6/seeding_10GeV/refit"
-loose_dir =  "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_timing/loose4/seeding_10GeV/refit"
+tight_dir = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/efficiency/seeding_10GeV/"
+medium_dir = "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_timing/p26_p5_p6/seeding_10GeV/"
+loose_dir =  "/ospool/uc-shared/project/futurecolliders/miralittmann/reco/reder_timing/loose4/seeding_10GeV/"
 window_to_dir = {"tight": tight_dir,
                  "medium": medium_dir,
                  "loose": loose_dir}
-n_files = 500
+n_files = 2500
 
-CACHE = pathlib.Path("cache/eff_from_slcio-seeding_10GeV-pcentstautest-refit.pkl")
+CACHE = pathlib.Path("cache/eff_from_slcio-seeding_10GeV-halfhitsvxd.pkl")
 
-plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency-seeding_10GeV-pcentstautest-refit.pdf"
+plot_path = "/scratch/miralittmann/analysis/mira_analysis_code/efficiency-seeding_10GeV-halfhitsvxd.pdf"
 
 sample_to_mass = {
     "1000_10": 1.0,
+    "1500_10": 1.5,
+    "2000_10": 2.0,
     "2500_10": 2.5,
     "3000_10": 3.0,
     "3500_10": 3.5,
     "4000_10": 4.0,
     "4500_10": 4.5
 }
-mass_list = [1.0, 2.5, 3.0, 3.5, 4.0, 4.5]
-samples = ["1000_10", "2500_10", "3000_10", "3500_10", "4000_10", "4500_10"]
+mass_list = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+samples = ["1000_10", "1500_10", "2000_10", "2500_10", "3000_10", "3500_10", "4000_10", "4500_10"]
 bib_options = ["bib", "nobib"]
 windows = ["loose", "medium", "tight"]
 
@@ -195,9 +197,9 @@ if efficiencies is None:
                         "ob_hits": []
                     },
 
-                    "pT": {"vb_hits": [],
-                        "ib_hits": [],
-                        "ob_hits": []}, 
+                    # "pT": {"vb_hits": [],
+                    #     "ib_hits": [],
+                    #     "ob_hits": []}, 
 
                     "pT_res": {
                         "vb_hits": [],
@@ -234,14 +236,15 @@ if efficiencies is None:
                     file_name = f"{sample}_reco{ifile}.slcio"
                     file_path = os.path.join(reco_dir,file_name) 
                     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                        print(f"couldn't open {file_path}")
                         continue
                     reader.open(file_path)
                     for event in reader:
                         rel_nav = build_rel_nav(event)
                         all_collections = event.getCollectionNames() 
                         mcp_collection = event.getCollection("MCParticle") if "MCParticle" in all_collections else None
-                        track_collection = event.getCollection("SiTracks_Refitted") if "SiTracks_Refitted" in all_collections else None # REFITTED
-                        track_relation_collection = event.getCollection("MCParticle_SiTracks_Refitted") if "MCParticle_SiTracks_Refitted" in all_collections else None # REFITTED
+                        track_collection = event.getCollection("SiTracks") if "SiTracks" in all_collections else None # REFITTED
+                        track_relation_collection = event.getCollection("MCParticle_SiTracks") if "MCParticle_SiTracks" in all_collections else None # REFITTED
 
                         if not (mcp_collection and track_collection and track_relation_collection):
                             print("issue 1")
@@ -302,7 +305,7 @@ if efficiencies is None:
                                     system = decoder["system"].value()
                                     layer = decoder["layer"].value()
                                     if system in (1,2):
-                                        vb_hits += 1
+                                        vb_hits += 0.5
                                         spatial_unc.append(0.005)
                                     elif system in (3,4):
                                         ib_hits += 1
@@ -339,25 +342,25 @@ if efficiencies is None:
                                 pT_res = (pT - pT_truth) / pT_truth   
                                 velo_res = (v_fit - velo_truth) / velo_truth     
                                 pcent_stau = stau_hit_count / len(track.getTrackerHits())
-                                print(pcent_stau, pT)
+                                # print(pcent_stau, pT)
     
                                 if vb_hits >= 3:
                                     save_info["vb_tracks"] += 1
                                     save_info["pT_res"]["vb_hits"].append(pT_res)
                                     save_info["velo_res"]["vb_hits"].append(velo_res)
-                                    save_info["pT"]["vb_hits"].append(pT)
+                                    # save_info["pT"]["vb_hits"].append(pT)
                                     save_info["pcent_stau"]["vb_hits"].append(pcent_stau)
                                 if vb_hits >= 3 and ib_hits >= 2:
                                     save_info["ib_tracks"] += 1
                                     save_info["pT_res"]["ib_hits"].append(pT_res)
                                     save_info["velo_res"]["ib_hits"].append(velo_res)
-                                    save_info["pT"]["ib_hits"].append(pT)
+                                    # save_info["pT"]["ib_hits"].append(pT)
                                     save_info["pcent_stau"]["ib_hits"].append(pcent_stau)
                                 if vb_hits >= 3 and ib_hits >= 2 and ob_hits >= 2:
                                     save_info["ob_tracks"] += 1
                                     save_info["pT_res"]["ob_hits"].append(pT_res)
                                     save_info["velo_res"]["ob_hits"].append(velo_res)
-                                    save_info["pT"]["ob_hits"].append(pT)
+                                    # save_info["pT"]["ob_hits"].append(pT)
                                     save_info["pcent_stau"]["ob_hits"].append(pcent_stau)
 
     CACHE.parent.mkdir(exist_ok=True)
@@ -366,6 +369,7 @@ if efficiencies is None:
         print(f"Writing cache to {CACHE}")
     print("Saved cache successfully.")
 
+print(efficiencies["loose"]["bib"].keys())
 
 window_to_name = {"tight": "Nominal", 
                   "medium": "Medium", 
@@ -391,9 +395,9 @@ def collect_residuals(effs, type, requirement_key, window, option):
 
 
 panels = [
-    ("vb_hits", "VB requirement"), # (≥3 VB hits)"),
-    ("ib_hits", "VB+IB requirement"), # (≥3 VB & ≥2 IB hits)"),
-    ("ob_hits", "VB+IB+OB requirement"), # (≥3 VB, ≥2 IB, ≥2 OB hits)")
+    ("vb_hits", "≥3 VB hits"),
+    ("ib_hits", "≥3 VB & ≥2 IB hits"),
+    ("ob_hits", "≥3 VB, ≥2 IB, ≥2 OB hits")
 ]
 
 panels0 = [
@@ -402,12 +406,11 @@ panels0 = [
     ("ob_tracks", "≥3 VB, ≥2 IB, ≥2 OB hits")
 ]
 
-samples_to_plot = ["3000_10"]
-
 plt.style.use("seaborn-v0_8-colorblind")
 with PdfPages(plot_path) as pdf:
     fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharex=True, sharey=True)
     masses = [sample_to_mass[s] for s in samples]
+    print(masses)
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     color_map = {"tight": colors[0], "medium": colors[1], "loose": colors[2]}
 
@@ -417,6 +420,7 @@ with PdfPages(plot_path) as pdf:
             trackeff_nobib, trackerr_nobib = [], []
             
             for sample in samples: 
+                print(sample)
                 d_b = efficiencies[window]["bib"][sample]
                 p_b, e_b = get_eff_and_err(d_b, req_key)
                 trackeff_bib.append(p_b); trackerr_bib.append(e_b)
@@ -436,6 +440,30 @@ with PdfPages(plot_path) as pdf:
                 label=f"{window_to_name[window]}, no BIB", fmt=":", alpha=0.7
             )
 
+            axes[0].text(
+                0.02, 0.20,
+                "Muon Collider",
+                ha="left", va="top",
+                transform=axes[0].transAxes,
+                fontsize=24,
+                fontweight="bold",
+                style="italic",
+            )
+            axes[0].text(
+                0.02, 0.13,
+                "Simulation 10% BIB, $\sqrt{s}$=10 TeV",
+                ha="left", va="top",
+                transform=axes[0].transAxes,
+                fontsize=18
+            ) 
+            axes[0].text(
+                0.02, 0.07,
+                "MuColl_v1",
+                ha="left", va="top",
+                transform=axes[0].transAxes,
+                fontsize=18
+            )
+            
             ax.set_title(title, fontsize=20)
 
     for ax in axes:
@@ -447,7 +475,7 @@ with PdfPages(plot_path) as pdf:
         ax.grid(True, alpha=0.2)
         ax.set_ylim(0,100)
 
-    axes[0].text( 0.02, 0.02, r"Non-refitted tracks", transform=axes[0].transAxes, ha="left", va="bottom", fontsize=16, fontweight="bold", style="italic" ) 
+    # axes[0].text( 0.02, 0.02, r"Non-refitted tracks", transform=axes[0].transAxes, ha="left", va="bottom", fontsize=16, fontweight="bold", style="italic" ) 
     handles, labels = [], [] 
     for ax in axes:
         h,l = ax.get_legend_handles_labels()
@@ -466,139 +494,139 @@ with PdfPages(plot_path) as pdf:
 
 
 
-    bins = np.linspace(-1.0, 1.0, 81)
-    fig1, axes1 = plt.subplots(1, 3, figsize=(18, 6), sharex=True, sharey=True)
-    show_nobib_outline = False
+    # bins = np.linspace(-1.0, 1.0, 81)
+    # fig1, axes1 = plt.subplots(1, 3, figsize=(18, 6), sharex=True, sharey=True)
+    # show_nobib_outline = False
 
-    for ax, (req_key, title) in zip(axes1, panels):
-        for w in windows:
-            data_bib = collect_residuals(efficiencies, "pT_res", req_key, w, "bib")
-            if data_bib.size == 0:
-                continue
-            weights = np.full_like(data_bib, 100.0 / data_bib.size, dtype=float)
-            ax.hist(
-                data_bib, bins=bins, weights=weights,
-                histtype="step", linewidth=1.8,
-                facecolor="none", edgecolor=color_map[w], color=color_map[w],
-                label=f"{window_to_name[w]} (10% BIB)"
-            )
+    # for ax, (req_key, title) in zip(axes1, panels):
+    #     for w in windows:
+    #         data_bib = collect_residuals(efficiencies, "pT_res", req_key, w, "bib")
+    #         if data_bib.size == 0:
+    #             continue
+    #         weights = np.full_like(data_bib, 100.0 / data_bib.size, dtype=float)
+    #         ax.hist(
+    #             data_bib, bins=bins, weights=weights,
+    #             histtype="step", linewidth=1.8,
+    #             facecolor="none", edgecolor=color_map[w], color=color_map[w],
+    #             label=f"{window_to_name[w]} (10% BIB)"
+    #         )
 
-            if show_nobib_outline:
-                data_nb = collect_residuals(efficiencies, "pT_res", req_key, w, "nobib")
-                if data_nb.size > 0:
-                    weights = np.full_like(data_nb, 100.0 / data_nb.size, dtype=float)
-                    ax.hist(
-                        data_nb, bins=bins, weights=weights,
-                        histtype="step", linewidth=1.8,
-                        color=color_map[w], linestyle='--'  
-                    )
+    #         if show_nobib_outline:
+    #             data_nb = collect_residuals(efficiencies, "pT_res", req_key, w, "nobib")
+    #             if data_nb.size > 0:
+    #                 weights = np.full_like(data_nb, 100.0 / data_nb.size, dtype=float)
+    #                 ax.hist(
+    #                     data_nb, bins=bins, weights=weights,
+    #                     histtype="step", linewidth=1.8,
+    #                     color=color_map[w], linestyle='--'  
+    #                 )
 
-        ax.axvline(0, lw=1, ls=":", color="k", alpha=0.5)
-        ax.set_title(title, fontsize=15)
-        ax.grid(True, alpha=0.2)
+    #     ax.axvline(0, lw=1, ls=":", color="k", alpha=0.5)
+    #     ax.set_title(title, fontsize=15)
+    #     ax.grid(True, alpha=0.2)
 
-    for ax in axes1:
-        ax.set_xlim(-1.0, 1.0)
-        ax.set_ylim(bottom=0)
-        ax.set_xlabel(r"$(p_T^{\mathrm{reco}} - p_T^{\mathrm{truth}})/p_T^{\mathrm{truth}}$", fontsize=20)
-        ax.text( 0.02, 0.98, r"$m_{\rm stau}=all$", transform=ax.transAxes, ha="left", va="top", fontsize=16, fontweight="bold", style="italic" ) 
+    # for ax in axes1:
+    #     ax.set_xlim(-1.0, 1.0)
+    #     ax.set_ylim(bottom=0)
+    #     ax.set_xlabel(r"$(p_T^{\mathrm{reco}} - p_T^{\mathrm{truth}})/p_T^{\mathrm{truth}}$", fontsize=20)
+    #     ax.text( 0.02, 0.98, r"$m_{\rm stau}=all$", transform=ax.transAxes, ha="left", va="top", fontsize=16, fontweight="bold", style="italic" ) 
 
-        ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-        ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-    axes1[0].set_ylabel("Tracks per bin (%) - $\\Delta$=0.025", fontsize=20)
+    #     ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+    #     ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+    # axes1[0].set_ylabel("Tracks per bin (%) - $\\Delta$=0.025", fontsize=20)
 
-    handles, labels = [], []
-    for ax in axes1:
-        h, l = ax.get_legend_handles_labels()
-        handles.extend(h); labels.extend(l)
-    by_label = OrderedDict(zip(labels, handles))
-    fig1.legend(
-        by_label.values(), by_label.keys(),
-        ncol=3, fontsize=18,
-        loc="upper center", bbox_to_anchor=(0.5, 1.08),
-        handlelength=1.5, handletextpad=0.5, columnspacing=1.0
-    )
+    # handles, labels = [], []
+    # for ax in axes1:
+    #     h, l = ax.get_legend_handles_labels()
+    #     handles.extend(h); labels.extend(l)
+    # by_label = OrderedDict(zip(labels, handles))
+    # fig1.legend(
+    #     by_label.values(), by_label.keys(),
+    #     ncol=3, fontsize=18,
+    #     loc="upper center", bbox_to_anchor=(0.5, 1.08),
+    #     handlelength=1.5, handletextpad=0.5, columnspacing=1.0
+    # )
 
-    fig1.tight_layout(rect=[0, 0, 1, 0.98])
-    pdf.savefig(fig1, bbox_inches="tight")
-    plt.close(fig1)
-
-
+    # fig1.tight_layout(rect=[0, 0, 1, 0.98])
+    # pdf.savefig(fig1, bbox_inches="tight")
+    # plt.close(fig1)
 
 
-    bins = np.linspace(-1.0, 1.0, 81)
-    fig1, axes1 = plt.subplots(1, 3, figsize=(18, 6), sharex=True, sharey=True)
-    show_nobib_outline = False
 
-    for ax, (req_key, title) in zip(axes1, panels):
-        for w in windows:
-            data_bib = collect_residuals(efficiencies, "velo_res", req_key, w, "bib")
-            if len(data_bib) == 0:
-                continue
-            weights = np.full_like(data_bib, 100.0/data_bib.size, dtype=float)
-            ax.hist(
-            data_bib,
-            bins=bins,
-            weights=weights,
-            histtype="step",
-            facecolor="none",
-            color=color_map[w],
-            label=f"{window_to_name[w]} (10% BIB)",
-            edgecolor=color_map[w],
-            linewidth=1.8
-        )
+
+    # bins = np.linspace(-1.0, 1.0, 81)
+    # fig1, axes1 = plt.subplots(1, 3, figsize=(18, 6), sharex=True, sharey=True)
+    # show_nobib_outline = False
+
+    # for ax, (req_key, title) in zip(axes1, panels):
+    #     for w in windows:
+    #         data_bib = collect_residuals(efficiencies, "velo_res", req_key, w, "bib")
+    #         if len(data_bib) == 0:
+    #             continue
+    #         weights = np.full_like(data_bib, 100.0/data_bib.size, dtype=float)
+    #         ax.hist(
+    #         data_bib,
+    #         bins=bins,
+    #         weights=weights,
+    #         histtype="step",
+    #         facecolor="none",
+    #         color=color_map[w],
+    #         label=f"{window_to_name[w]} (10% BIB)",
+    #         edgecolor=color_map[w],
+    #         linewidth=1.8
+    #     )
         
-            if show_nobib_outline:
-                data_nobib = collect_residuals(efficiencies, "velo_res", req_key, w, "nobib")
-                if len(data_nobib) > 0:
-                    weights = np.full_like(data_nobib, 100.0/data_nobib.size, dtype=float)
-                    ax.hist(
-                        data_nobib,
-                        bins=bins,
-                        weights=weights,
-                        histtype="step",
-                        linewidth=1.8,
-                        color=color_map[w],
-                        label=f"{window_to_name[w]} (no BIB)",
-                        linestyle="--"
-                    )
-        ax.axvline(0, lw=1, ls=":", color="k", alpha=0.5)
-        ax.set_title(title, fontsize=15)
-        ax.grid(True, alpha=0.2)
+    #         if show_nobib_outline:
+    #             data_nobib = collect_residuals(efficiencies, "velo_res", req_key, w, "nobib")
+    #             if len(data_nobib) > 0:
+    #                 weights = np.full_like(data_nobib, 100.0/data_nobib.size, dtype=float)
+    #                 ax.hist(
+    #                     data_nobib,
+    #                     bins=bins,
+    #                     weights=weights,
+    #                     histtype="step",
+    #                     linewidth=1.8,
+    #                     color=color_map[w],
+    #                     label=f"{window_to_name[w]} (no BIB)",
+    #                     linestyle="--"
+    #                 )
+    #     ax.axvline(0, lw=1, ls=":", color="k", alpha=0.5)
+    #     ax.set_title(title, fontsize=15)
+    #     ax.grid(True, alpha=0.2)
 
-    for ax in axes1:
-        ax.set_xlim(-0.5, 0.5)
-        ax.set_ylim(bottom=0)
-        ax.set_xlabel(r"$(v^{\mathrm{reco}} - v^{\mathrm{truth}})/v^{\mathrm{truth}}$", fontsize=20)
-        axes1[0].set_ylabel("Tracks per bin (%) - $\Delta$ = 0.025", fontsize=20) 
-        ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
-        ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
-        ax.text(
-                0.02, 0.98, r"$m_{\rm stau}=all$",
-                transform=ax.transAxes,
-                ha="left", va="top",
-                fontsize=16, fontweight="bold", style="italic"
-        )
+    # for ax in axes1:
+    #     ax.set_xlim(-0.5, 0.5)
+    #     ax.set_ylim(bottom=0)
+    #     ax.set_xlabel(r"$(v^{\mathrm{reco}} - v^{\mathrm{truth}})/v^{\mathrm{truth}}$", fontsize=20)
+    #     axes1[0].set_ylabel("Tracks per bin (%) - $\Delta$ = 0.025", fontsize=20) 
+    #     ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
+    #     ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+    #     ax.text(
+    #             0.02, 0.98, r"$m_{\rm stau}=all$",
+    #             transform=ax.transAxes,
+    #             ha="left", va="top",
+    #             fontsize=16, fontweight="bold", style="italic"
+    #     )
 
     
-    handles, labels = [], []
-    for ax in axes1:
-        h, l = ax.get_legend_handles_labels()
-        handles.extend(h)
-        labels.extend(l)
+    # handles, labels = [], []
+    # for ax in axes1:
+    #     h, l = ax.get_legend_handles_labels()
+    #     handles.extend(h)
+    #     labels.extend(l)
 
-    by_label = OrderedDict(zip(labels, handles))
-    fig1.legend(
-        by_label.values(), by_label.keys(),
-        ncol=3, fontsize=18,
-        loc="upper center", bbox_to_anchor=(0.5, 1.08),
-        handlelength=1.5, handletextpad=0.5, columnspacing=1.0
-    )
+    # by_label = OrderedDict(zip(labels, handles))
+    # fig1.legend(
+    #     by_label.values(), by_label.keys(),
+    #     ncol=3, fontsize=18,
+    #     loc="upper center", bbox_to_anchor=(0.5, 1.08),
+    #     handlelength=1.5, handletextpad=0.5, columnspacing=1.0
+    # )
 
 
-    fig1.tight_layout(rect=[0, 0, 1, 0.98])
-    pdf.savefig(fig1, bbox_inches="tight")
-    plt.close(fig1)
+    # fig1.tight_layout(rect=[0, 0, 1, 0.98])
+    # pdf.savefig(fig1, bbox_inches="tight")
+    # plt.close(fig1)
 
 
 
@@ -610,13 +638,35 @@ with PdfPages(plot_path) as pdf:
     for i, (window, row_name) in enumerate(windows_and_names):
         for j,((req_key, title), ax) in enumerate(zip(panels, axes[i])):
             for sample in ["1000_10", "2500_10", "3500_10", "4000_10"]:
-                pT = np.asarray(efficiencies[window]["bib"][sample]["pT_res"][req_key])
+                pT = np.asarray(efficiencies[window]["nobib"][sample]["pT_res"][req_key])
                 if pT.size==0:
                     continue
                 weights = np.full_like(pT, 100.0/pT.size, dtype=float)
 
-                ax.hist(pT, bins=bins, weights=weights, histtype="step", facecolor="none", linewidth=2.5, label=f"{sample_to_mass[sample]} TeV")
-
+                ax.hist(pT, bins=bins, weights=weights, histtype="step", facecolor="none", linewidth=2.5, label=f"{sample_to_mass[sample]} TeV", linestyle="--")
+                axes[0,2].text(
+                    0.98, 0.98,
+                    "Muon Collider",
+                    ha="right", va="top",
+                    transform=axes[0,2].transAxes,
+                    fontsize=24,
+                    fontweight="bold",
+                    style="italic",
+                )
+                axes[0,2].text(
+                    0.98, 0.90,
+                    r"Simulation No BIB, $\sqrt{s}=10\ \mathrm{TeV}$",
+                    ha="right", va="top",
+                    transform=axes[0,2].transAxes,
+                    fontsize=18
+                ) 
+                axes[0,2].text(
+                    0.98, 0.83,
+                    "MuColl_v1",
+                    ha="right", va="top",
+                    transform=axes[0,2].transAxes,
+                    fontsize=18
+                )
                 # ax.set_title(title, fontsize=15)
                 ax.grid(True, alpha=0.2)
                 ax.grid(True, which="minor", alpha=0.1) 
@@ -653,18 +703,49 @@ with PdfPages(plot_path) as pdf:
     plt.close(fig)   
 
 
-    bins = np.linspace(-1, 1, 31)
+    bins = np.linspace(-1, 1, 41)
     fig, axes = plt.subplots(3, 3, figsize=(18, 15), sharex=True, sharey=True)
     
     for i, (window, row_name) in enumerate(windows_and_names):
         for j,((req_key, title), ax) in enumerate(zip(panels, axes[i])):
             for sample in ["1000_10", "2500_10", "3500_10", "4000_10"]:
-                pT = np.asarray(efficiencies[window]["bib"][sample]["velo_res"][req_key])
-                if pT.size==0:
+                v = np.asarray(efficiencies[window]["nobib"][sample]["velo_res"][req_key])
+                if v.size==0:
                     continue
-                weights = np.full_like(pT, 100.0/pT.size, dtype=float)
+                weights = np.full_like(v, 100.0/v.size, dtype=float)
 
-                ax.hist(pT, bins=bins, weights=weights, histtype="step", facecolor="none", linewidth=2.5, label=f"{sample_to_mass[sample]} TeV")
+                if req_key=="ob_hits" and window=="loose":
+                    print(sample, np.mean(v)*100)
+                ax.hist(v, bins=bins, weights=weights, histtype="step", facecolor="none", linewidth=2.5, label=f"{sample_to_mass[sample]} TeV", linestyle="--")
+                axes[0,0].text(
+                    0.02, 0.98,
+                    "Muon Collider",
+                    ha="left", va="top",
+                    transform=axes[0,0].transAxes,
+                    fontsize=24,
+                    fontweight="bold",
+                    style="italic",
+                )
+                axes[0,0].text(
+                    0.02, 0.90,
+                    "Simulation No BIB, $\sqrt{s}$=10 TeV",
+                    ha="left", va="top",
+                    transform=axes[0,0].transAxes,
+                    fontsize=18
+                ) 
+                axes[0,0].text(
+                    0.02, 0.83,
+                    "MuColl_v1",
+                    ha="left", va="top",
+                    transform=axes[0,0].transAxes,
+                    fontsize=18
+                )
+                
+                
+                # if v_nobib.size==0:
+                #     continue
+                # weights_nobib = np.full_like(v_nobib, 100.0/v_nobib.size, dtype=float)
+                # ax.hist(v_nobib, bins=bins, weights=weights_nobib, histtype="step", facecolor="none", linewidth=2.5, label=f"{sample_to_mass[sample]} TeV, no BIB", linestyle="--")
 
                 # ax.set_title(title, fontsize=15)
                 ax.grid(True, alpha=0.2)
@@ -672,12 +753,13 @@ with PdfPages(plot_path) as pdf:
                 ax.minorticks_on()
                 ax.tick_params(axis="both", which="major", labelsize=16, length=6, width=1.5)
                 ax.tick_params(axis="both", which="minor", labelsize=14, length=4, width=1.0)
+                ax.set_xlim(-0.5, 0.5)
 
                 if i == 2:
                     ax.set_xlabel(r"$(v^{\mathrm{reco}} - v^{\mathrm{truth}})/v^{\mathrm{truth}}$",fontsize=25)
                 if j == 0:
                     ax.set_ylabel("Tracks per bin (%)", fontsize=25)
-            axes[i, 0].text(-0.2, 0.5, f"{row_name} window",transform=axes[i, 0].transAxes,ha="right", va="center",rotation=90, fontsize=25, fontweight="bold", style="italic")
+            axes[i, 0].text(-0.17, 0.5, f"{row_name} window",transform=axes[i, 0].transAxes,ha="right", va="center",rotation=90, fontsize=25, fontweight="bold", style="italic")
     
     for j, (_, title) in enumerate(panels):
         axes[0, j].set_title(title, fontsize=20, fontweight="bold", pad=10)
@@ -704,65 +786,63 @@ with PdfPages(plot_path) as pdf:
 
 
 
-    option   = "bib"       
-    sample   = "2500_10"   
-    mass_lab = f"{sample_to_mass[sample]:g} TeV"
-    window = "loose"
+    # mass_lab = f"{sample_to_mass[sample]:g} TeV"
+    # window = "loose"
 
-    req_panels = [
-        ("vb_hits", "≥3 VB"),
-        ("ib_hits", "≥3 VB & ≥2 IB"),
-        ("ob_hits", "≥3 VB, ≥2 IB, ≥2 OB"),
-    ]
+    # req_panels = [
+    #     ("vb_hits", "≥3 VB"),
+    #     ("ib_hits", "≥3 VB & ≥2 IB"),
+    #     ("ob_hits", "≥3 VB, ≥2 IB, ≥2 OB"),
+    # ]
 
-    for sample in ("1000_10", "2500_10", "3500_10", "4000_10"):
-        for window in ("tight", "medium", "loose"):
-            mass_lab = f"{sample_to_mass[sample]:g} TeV"    
-            stau_bins = np.array(np.linspace(50,101, 20), dtype=float)
-            bin_centers  = 0.5 * (stau_bins[1:] + stau_bins[:-1])
+    # for sample in ("1000_10", "2500_10", "3500_10", "4000_10"):
+    #     for window in ("tight", "medium", "loose"):
+    #         mass_lab = f"{sample_to_mass[sample]:g} TeV"    
+    #         stau_bins = np.array(np.linspace(50,101, 20), dtype=float)
+    #         bin_centers  = 0.5 * (stau_bins[1:] + stau_bins[:-1])
 
-            fig, axes = plt.subplots(1, 3, figsize=(18, 5.5), sharex=True, sharey=True, constrained_layout=True)
+    #         fig, axes = plt.subplots(1, 3, figsize=(18, 5.5), sharex=True, sharey=True, constrained_layout=True)
 
-            for ax, (req_key, title) in zip(axes, req_panels):
-                pT_res = np.asarray(efficiencies[window][option][sample]["pT_res"][req_key], float)
-                pcent  = np.asarray(efficiencies[window][option][sample]["pcent_stau"][req_key], float) * 100.0  # %
+    #         for ax, (req_key, title) in zip(axes, req_panels):
+    #             pT_res = np.asarray(efficiencies[window]["bib"][sample]["pT_res"][req_key], float)
+    #             pcent  = np.asarray(efficiencies[window]["bib"][sample]["pcent_stau"][req_key], float) * 100.0  # %
 
-                m = np.isfinite(pT_res) & np.isfinite(pcent)
-                pT_res = pT_res[m]
-                pcent  = pcent[m]
-                if pT_res.size == 0:
-                    ax.text(0.5, 0.5, "No tracks", ha="center", va="center", transform=ax.transAxes)
-                    continue
+    #             m = np.isfinite(pT_res) & np.isfinite(pcent)
+    #             pT_res = pT_res[m]
+    #             pcent  = pcent[m]
+    #             if pT_res.size == 0:
+    #                 ax.text(0.5, 0.5, "No tracks", ha="center", va="center", transform=ax.transAxes)
+    #                 continue
 
-                r_lo, r_hi = np.quantile(pT_res, [0.01, 0.99])
-                pad = 0.05 * max(1e-6, r_hi - r_lo)
-                residual_bins = np.linspace(r_lo - pad, r_hi + pad, 25)
+    #             r_lo, r_hi = np.quantile(pT_res, [0.01, 0.99])
+    #             pad = 0.05 * max(1e-6, r_hi - r_lo)
+    #             residual_bins = np.linspace(r_lo - pad, r_hi + pad, 25)
 
-                H, xedges, yedges = np.histogram2d(pcent, pT_res, bins=[stau_bins, residual_bins])
+    #             H, xedges, yedges = np.histogram2d(pcent, pT_res, bins=[stau_bins, residual_bins])
 
-                X, Y = np.meshgrid(xedges, yedges)
+    #             X, Y = np.meshgrid(xedges, yedges)
 
-                H_plot = H.T  
-                H_plot_masked = np.ma.masked_where(H_plot <= 0, H_plot)
+    #             H_plot = H.T  
+    #             H_plot_masked = np.ma.masked_where(H_plot <= 0, H_plot)
 
-                pcm = ax.pcolormesh(X, Y, H_plot_masked, cmap="viridis", shading="auto")
-                ax.set_title(title, fontsize=20)
-                ax.set_xlabel("% stau hits", fontsize=20)
-                ax.grid(True, alpha=0.2)
+    #             pcm = ax.pcolormesh(X, Y, H_plot_masked, cmap="viridis", shading="auto")
+    #             ax.set_title(title, fontsize=20)
+    #             ax.set_xlabel("% of true stau hits in stau tracks", fontsize=20)
+    #             ax.grid(True, alpha=0.2)
 
-                ax.axhline(y=0, linestyle="--", color="gray", alpha=0.5)
+    #             ax.axhline(y=0, linestyle="--", color="gray", alpha=0.5)
 
-            axes[0].set_ylabel(r"$(p_T^{\mathrm{reco}} - p_T^{\mathrm{truth}})/p_T^{\mathrm{truth}}$", fontsize=20)
-            for ax in axes:
-                ax.set_xlim(stau_bins[0], stau_bins[-1])
+    #         axes[0].set_ylabel(r"$(p_T^{\mathrm{reco}} - p_T^{\mathrm{truth}})/p_T^{\mathrm{truth}}$", fontsize=20)
+    #         for ax in axes:
+    #             ax.set_xlim(stau_bins[0], stau_bins[-1])
 
-            cbar = fig.colorbar(pcm, ax=axes.ravel().tolist(), orientation="vertical", pad=0.02)
-            cbar.set_label("Tracks per bin", fontsize=15)
+    #         cbar = fig.colorbar(pcm, ax=axes.ravel().tolist(), orientation="vertical", pad=0.02)
+    #         cbar.set_label("Tracks per bin", fontsize=15)
 
-            fig.suptitle(f"{mass_lab} — {window_to_name[window]} window - No refit", fontsize=25, y=1.1, fontweight="bold")
-            #fig.tight_layout()
-            pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)
+    #         fig.suptitle(f"{mass_lab} staus — {window_to_name[window]} window", fontsize=25, y=1.1)
+    #         #fig.tight_layout()
+    #         pdf.savefig(fig, bbox_inches="tight")
+    #         plt.close(fig)
 
 
 
@@ -783,110 +863,110 @@ print(f"Saved plots to {plot_path}")
 
 
  
-def get_residuals_by_sample(effs, kind, requirement_key, window, option, sample):
-    #  kind in {"pT_res", "velo_res"}
-    arr = effs[window][option][sample][kind][requirement_key]
-    if isinstance(arr, list):
-        return np.asarray(arr, dtype=float)
-    return np.array([], dtype=float)
+# def get_residuals_by_sample(effs, kind, requirement_key, window, option, sample):
+#     #  kind in {"pT_res", "velo_res"}
+#     arr = effs[window][option][sample][kind][requirement_key]
+#     if isinstance(arr, list):
+#         return np.asarray(arr, dtype=float)
+#     return np.array([], dtype=float)
 
-core_range = (-0.5,0.5)          
+# core_range = (-0.5,0.5)          
 
-def gaussian_core_fit(values, core=core_range, nbins=60):
-    v = np.asarray(values, float)
-    v = v[np.isfinite(v)]
-    n_total = v.size
-    if n_total == 0:
-        return (np.nan, np.nan, np.nan, 0, 0)
-    core = v[(v >= core_range[0]) & (v <= core_range[1])]
+# def gaussian_core_fit(values, core=core_range, nbins=60):
+#     v = np.asarray(values, float)
+#     v = v[np.isfinite(v)]
+#     n_total = v.size
+#     if n_total == 0:
+#         return (np.nan, np.nan, np.nan, 0, 0)
+#     core = v[(v >= core_range[0]) & (v <= core_range[1])]
     
-    n_core = core.size
-    frac_core = n_core / n_total if n_total > 0 else np.nan
-    if n_core < 15:
-        # not enough stats to fit robustly
-        return (np.nan, np.nan, frac_core, n_total, n_core)
+#     n_core = core.size
+#     frac_core = n_core / n_total if n_total > 0 else np.nan
+#     if n_core < 15:
+#         # not enough stats to fit robustly
+#         return (np.nan, np.nan, frac_core, n_total, n_core)
     
-    hist, edges = np.histogram(core, bins=nbins, range=core_range)
-    x = 0.5 * (edges[1:] + edges[:-1])
-    if np.all(hist == 0):
-        return (np.nan, np.nan, frac_core, n_total, n_core)
+#     hist, edges = np.histogram(core, bins=nbins, range=core_range)
+#     x = 0.5 * (edges[1:] + edges[:-1])
+#     if np.all(hist == 0):
+#         return (np.nan, np.nan, frac_core, n_total, n_core)
 
-    mu0 = float(np.mean(core))
-    sig0 = float(np.std(core, ddof=1)) if n_core >= 2 else 0.1
-    if not (np.isfinite(sig0) and sig0 > 1e-4):
-        sig0 = 0.1
-    A0 = float(hist.max())
+#     mu0 = float(np.mean(core))
+#     sig0 = float(np.std(core, ddof=1)) if n_core >= 2 else 0.1
+#     if not (np.isfinite(sig0) and sig0 > 1e-4):
+#         sig0 = 0.1
+#     A0 = float(hist.max())
 
-    def _gauss(xx, A, mu, sig):
-        return A * np.exp(-0.5 * ((xx - mu) / sig) ** 2)
+#     def _gauss(xx, A, mu, sig):
+#         return A * np.exp(-0.5 * ((xx - mu) / sig) ** 2)
 
-    try:
-        (A, mu, sig), _ = optimize.curve_fit(
-            _gauss, x, hist, p0=[A0, mu0, sig0],
-            bounds=([0.0, core_range[0]-1.0, 1e-4],
-                    [np.inf, core_range[1]+1.0, 1.0]),
-            maxfev=10000
-        )
-        mu_fit, sigma_fit = float(mu), float(sig)
-    except Exception:
-        mu_fit = mu0
-        sigma_fit = sig0
+#     try:
+#         (A, mu, sig), _ = optimize.curve_fit(
+#             _gauss, x, hist, p0=[A0, mu0, sig0],
+#             bounds=([0.0, core_range[0]-1.0, 1e-4],
+#                     [np.inf, core_range[1]+1.0, 1.0]),
+#             maxfev=10000
+#         )
+#         mu_fit, sigma_fit = float(mu), float(sig)
+#     except Exception:
+#         mu_fit = mu0
+#         sigma_fit = sig0
 
-    return (mu_fit, sigma_fit, frac_core, n_total, n_core)
+#     return (mu_fit, sigma_fit, frac_core, n_total, n_core)
 
 
-rows = []
-req_keys = ["vb_hits", "ib_hits", "ob_hits"]  
+# rows = []
+# req_keys = ["vb_hits", "ib_hits", "ob_hits"]  
 
-for window in windows:                # loose / medium / tight
-    for option in bib_options:        # "bib" / "nobib"
-        for req_key in req_keys:      # requirement category
-            for sample in samples:    # each mass sample
-                mass_TeV = sample_to_mass[sample]
+# for window in windows:                # loose / medium / tight
+#     for option in bib_options:        # "bib" / "nobib"
+#         for req_key in req_keys:      # requirement category
+#             for sample in samples:    # each mass sample
+#                 mass_TeV = sample_to_mass[sample]
 
-                # pT residuals
-                arr_pt = get_residuals_by_sample(
-                    efficiencies, "pT_res", req_key, window, option, sample
-                )
-                mean_pt, std_pt, frac_pt, n_pt, n_pt_core = gaussian_core_fit(arr_pt)
+#                 # pT residuals
+#                 arr_pt = get_residuals_by_sample(
+#                     efficiencies, "pT_res", req_key, window, option, sample
+#                 )
+#                 mean_pt, std_pt, frac_pt, n_pt, n_pt_core = gaussian_core_fit(arr_pt)
 
-                rows.append({
-                    "kind": "pT",
-                    "window": window,
-                    "BIB": option,
-                    "requirement": req_key,
-                    #"sample": sample,
-                    "mass_TeV": mass_TeV,
-                    "mean_core": mean_pt,
-                    "std_core": std_pt,
-                    "frac_in_core": frac_pt,
-                    #"n_total": n_pt,
-                    #"n_core": n_pt_core,
-                })
+#                 rows.append({
+#                     "kind": "pT",
+#                     "window": window,
+#                     "BIB": option,
+#                     "requirement": req_key,
+#                     #"sample": sample,
+#                     "mass_TeV": mass_TeV,
+#                     "mean_core": mean_pt,
+#                     "std_core": std_pt,
+#                     "frac_in_core": frac_pt,
+#                     #"n_total": n_pt,
+#                     #"n_core": n_pt_core,
+#                 })
 
-                # velocity residuals
-                arr_v = get_residuals_by_sample(
-                    efficiencies, "velo_res", req_key, window, option, sample
-                )
-                mean_v, std_v, frac_v, n_v, n_v_core = gaussian_core_fit(arr_v)
+#                 # velocity residuals
+#                 arr_v = get_residuals_by_sample(
+#                     efficiencies, "velo_res", req_key, window, option, sample
+#                 )
+#                 mean_v, std_v, frac_v, n_v, n_v_core = gaussian_core_fit(arr_v)
 
-                rows.append({
-                    "kind": "velocity",
-                    "window": window,
-                    "BIB": option,
-                    "requirement": req_key,
-                    #"sample": sample,
-                    "mass_TeV": mass_TeV,
-                    "mean_core": mean_v,
-                    "std_core": std_v,
-                    "frac_in_core": frac_v,
-                    #"n_total": n_v,
-                    #"n_core": n_v_core,
-                })
+#                 rows.append({
+#                     "kind": "velocity",
+#                     "window": window,
+#                     "BIB": option,
+#                     "requirement": req_key,
+#                     #"sample": sample,
+#                     "mass_TeV": mass_TeV,
+#                     "mean_core": mean_v,
+#                     "std_core": std_v,
+#                     "frac_in_core": frac_v,
+#                     #"n_total": n_v,
+#                     #"n_core": n_v_core,
+#                 })
 
-summary_csv = "/scratch/miralittmann/analysis/mira_analysis_code/stats_for_res.csv"
-df_summary = pd.DataFrame(rows)
-df_summary = df_summary.replace([np.nan, np.inf, -np.inf], "--")
-df_summary.sort_values(["kind","mass_TeV","window","BIB","requirement"], inplace=True)
-df_summary.to_csv(summary_csv, index=False)
-print(f"Wrote stats summary (mean/std/frac_core) to {summary_csv}")
+# summary_csv = "/scratch/miralittmann/analysis/mira_analysis_code/stats_for_res.csv"
+# df_summary = pd.DataFrame(rows)
+# df_summary = df_summary.replace([np.nan, np.inf, -np.inf], "--")
+# df_summary.sort_values(["kind","mass_TeV","window","BIB","requirement"], inplace=True)
+# df_summary.to_csv(summary_csv, index=False)
+# print(f"Wrote stats summary (mean/std/frac_core) to {summary_csv}")
